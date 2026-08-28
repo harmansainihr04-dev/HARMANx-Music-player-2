@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Slowed Reverb & Acoustic Echo Waves Vector Icon -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,4V15.55C11.41,15.21 10.73,15 10,15C7.79,15 6,16.79 6,19C6,21.21 7.79,23 10,23C12.21,23 14,21.21 14,19V7H18V4H12ZM10,21C8.9,21 8,20.1 8,19C8,17.9 8.9,17 10,17C11.1,17 12,17.9 12,19C12,20.1 11.1,21 10,21Z"/>
+    <!-- Slower tempo wave / reverb ripples -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M2.5,13C2.5,9.41 5.41,6.5 9,6.5V4.5C4.31,4.5 0.5,8.31 0.5,13C0.5,17.69 4.31,21.5 9,21.5V19.5C5.41,19.5 2.5,16.59 2.5,13Z"/>
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,10.5C19.93,10.5 21.5,12.07 21.5,14C21.5,15.93 19.93,17.5 18,17.5V19.5C21.04,19.5 23.5,17.04 23.5,14C23.5,10.96 21.04,8.5 18,8.5V10.5Z"/>
+</vector>

@@ -1,0 +1,6 @@
+{
+  "name": "HARMANX",
+  "description": "Full Equalizer Customizable MP3 & Music Player for Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
