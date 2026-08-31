@@ -965,11 +965,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         val presets = listOf(
             EqPreset.BASS_BOOSTER,
             EqPreset.CUSTOM_BASS,
-            EqPreset.ELECTRONIC,
             EqPreset.ROCK,
             EqPreset.POP,
             EqPreset.VOCAL,
-            EqPreset.JAZZ,
             EqPreset.FLAT
         )
         val currentIndex = presets.indexOf(_selectedPreset.value)

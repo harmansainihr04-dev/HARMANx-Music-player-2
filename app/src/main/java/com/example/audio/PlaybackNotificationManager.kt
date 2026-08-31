@@ -161,12 +161,12 @@ class PlaybackNotificationManager(private val context: Context) {
                             val current = engine.isSlowedReverbEnabled.value
                             engine.setSlowedReverbEnabled(!current)
                         }
-                        ACTION_CUSTOM_RESET_EQ, ACTION_CUSTOM_CYCLE_EQ_PRESET -> {
-                            engine.resetEqualizer()
-                        }
                         ACTION_CUSTOM_TOGGLE_EQ, ACTION_CUSTOM_BASS_BOOST -> {
                             val current = engine.eqEnabled.value
                             engine.setEqEnabled(!current)
+                        }
+                        ACTION_CUSTOM_CYCLE_EQ_PRESET, ACTION_CUSTOM_RESET_EQ -> {
+                            engine.cycleEqPreset()
                         }
                         ACTION_CUSTOM_TOGGLE_360 -> {
                             val current = engine.surround360Enabled.value
@@ -291,6 +291,8 @@ class PlaybackNotificationManager(private val context: Context) {
             val is360 = engine?.surround360Enabled?.value == true
             val currentSpeed = engine?.playbackSpeed?.value ?: 1.0f
 
+            val currentPresetName = engine?.selectedPreset?.value?.displayName ?: "Preset"
+
             val pbState = PlaybackState.Builder()
                 .setActions(
                     PlaybackState.ACTION_PLAY or
@@ -313,8 +315,15 @@ class PlaybackNotificationManager(private val context: Context) {
                 )
                 .addCustomAction(
                     PlaybackState.CustomAction.Builder(
-                        ACTION_CUSTOM_RESET_EQ,
-                        "🔄 Reset EQ (Flat)",
+                        ACTION_CUSTOM_TOGGLE_EQ,
+                        if (isEqOn) "🎛️ Equalizer [ON]" else "Equalizer [OFF]",
+                        R.drawable.ic_auto_eq_preset
+                    ).build()
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        ACTION_CUSTOM_CYCLE_EQ_PRESET,
+                        "🎛️ Preset: $currentPresetName",
                         R.drawable.ic_auto_eq_preset
                     ).build()
                 )

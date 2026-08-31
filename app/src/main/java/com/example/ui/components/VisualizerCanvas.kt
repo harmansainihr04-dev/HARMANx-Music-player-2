@@ -51,7 +51,11 @@ fun VisualizerCanvas(
         val maxHeight = size.height
 
         val gradient = Brush.verticalGradient(
-            colors = listOf(CyberNeonCyan, CyberElectricPurple, Color(0xFFFF3D00))
+            colors = listOf(
+                CyberNeonCyan.copy(alpha = 0.30f),
+                CyberElectricPurple.copy(alpha = 0.30f),
+                Color(0xFFFF3D00).copy(alpha = 0.30f)
+            )
         )
 
         for (i in 0 until barCount) {
