@@ -338,7 +338,7 @@ fun EqualizerScreen(
                 .clip(RoundedCornerShape(16.dp))
                 .border(
                     1.dp,
-                    if (surround360Enabled && eqEnabled) EqNeonGreen.copy(alpha = 0.5f) else DarkCardBorder,
+                    if (surround360Enabled) EqNeonGreen.copy(alpha = 0.5f) else DarkCardBorder,
                     RoundedCornerShape(16.dp)
                 ),
             colors = CardDefaults.cardColors(containerColor = DarkSurface)
@@ -362,7 +362,7 @@ fun EqualizerScreen(
                                 .size(38.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
-                                    if (surround360Enabled && eqEnabled) {
+                                    if (surround360Enabled) {
                                         Brush.linearGradient(listOf(EqNeonGreen.copy(alpha = 0.35f), EqNeonGreenAccent.copy(alpha = 0.2f)))
                                     } else {
                                         Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurfaceVariant))
@@ -373,7 +373,7 @@ fun EqualizerScreen(
                             Icon(
                                 imageVector = Icons.Default.SpatialAudio,
                                 contentDescription = "360 Spatial Audio",
-                                tint = if (surround360Enabled && eqEnabled) EqNeonGreenAccent else TextMuted,
+                                tint = if (surround360Enabled) EqNeonGreenAccent else TextMuted,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -391,13 +391,13 @@ fun EqualizerScreen(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(if (surround360Enabled && eqEnabled) EqNeonGreen.copy(alpha = 0.25f) else DarkSurfaceVariant)
+                                        .background(if (surround360Enabled) EqNeonGreen.copy(alpha = 0.25f) else DarkSurfaceVariant)
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                 ) {
                                     Text(
                                         text = "3D SPHERE",
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            color = if (surround360Enabled && eqEnabled) EqNeonGreenAccent else TextMuted,
+                                            color = if (surround360Enabled) EqNeonGreenAccent else TextMuted,
                                             fontSize = 8.sp,
                                             fontWeight = FontWeight.Black
                                         )
@@ -440,7 +440,7 @@ fun EqualizerScreen(
                                 val centerX = size.width / 2f
                                 val centerY = size.height / 2f
                                 val maxRadius = (size.height / 2f) - 6f
-                                val currentOrbitDeg = if (eqEnabled && surround360Enabled) orbitPhase else 0f
+                                val currentOrbitDeg = if (surround360Enabled) orbitPhase else 0f
 
                                 // Outer 360 Acoustic boundary rings
                                 drawCircle(
@@ -773,9 +773,9 @@ fun EqualizerScreen(
         ) {
             items(EqPreset.entries.toTypedArray()) { preset ->
                 FilterChip(
-                    selected = selectedPreset == preset,
+                    selected = selectedPreset == preset && eqEnabled,
                     onClick = { onPresetSelect(preset) },
-                    enabled = eqEnabled,
+                    enabled = true,
                     label = { Text(preset.displayName, fontWeight = FontWeight.Medium) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = EqNeonGreen,
@@ -784,8 +784,8 @@ fun EqualizerScreen(
                         labelColor = TextSecondary
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        enabled = eqEnabled,
-                        selected = selectedPreset == preset,
+                        enabled = true,
+                        selected = selectedPreset == preset && eqEnabled,
                         borderColor = DarkCardBorder,
                         selectedBorderColor = EqNeonGreen
                     ),

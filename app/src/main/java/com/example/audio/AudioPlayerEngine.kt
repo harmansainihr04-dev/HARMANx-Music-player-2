@@ -50,15 +50,15 @@ enum class SpatialMode(
     val title: String,
     val description: String,
     val virtualizerStrength: Float,
-    val bassCompensation: Float,
-    val centerClarityBoost: Float
+    val bassCompensation: Float = 0.30f,
+    val centerClarityBoost: Float = 0.20f
 ) {
     HEADPHONES_3D(
         title = "3D Binaural Headphones",
         description = "AirPods & IEMs tuned • Center vocal clarity lock with 360° spherical staging",
         virtualizerStrength = 1.0f,
         bassCompensation = 0.35f,
-        centerClarityBoost = 0.20f
+        centerClarityBoost = 0.25f
     ),
     ARENA_360(
         title = "360° Concert Arena",
@@ -71,7 +71,7 @@ enum class SpatialMode(
         title = "Car Cabin Surround",
         description = "Multi-speaker car dispersion • Anti-cancellation deep punchy sub-bass",
         virtualizerStrength = 0.90f,
-        bassCompensation = 0.50f,
+        bassCompensation = 0.45f,
         centerClarityBoost = 0.10f
     )
 }
@@ -79,7 +79,7 @@ enum class SpatialMode(
 enum class EqPreset(val displayName: String, val gains: FloatArray, val bassBoost: Float) {
     FLAT("Flat", floatArrayOf(0f, 0f, 0f, 0f, 0f), 0f),
     BASS_BOOSTER("Bass Booster", floatArrayOf(6f, 8f, 4f, 1f, 0f), 0.70f),
-    CUSTOM_BASS("Custom Bass", floatArrayOf(10f, 0f, 0f, 0f, 0f), 0.60f),
+    CUSTOM_BASS("Custom Bass", floatArrayOf(8f, 2f, 3f, 0f, 3f), 0.60f),
     ROCK("Rock", floatArrayOf(5f, 3f, -1f, 3f, 5f), 0.5f),
     ELECTRONIC("Electronic", floatArrayOf(6f, 5f, 0f, 2f, 4f), 0.7f),
     JAZZ("Jazz", floatArrayOf(3f, 2f, 1f, 2f, 3f), 0.3f),
@@ -498,7 +498,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 val baseTempoBpm = 110 + (trackSeed * 8)
 
                 var currentSmoothedBass = if (_eqEnabled.value) _bassBoostLevel.value else 0f
-                var currentSmoothedSurround = if (_eqEnabled.value && _surround360Enabled.value) _surroundStrength.value else 0f
+                var currentSmoothedSurround = if (_surround360Enabled.value) (_surroundStrength.value * _spatialMode.value.virtualizerStrength) else 0f
 
                 // Algorithmic Schroeder Reverb comb-filter ring buffers (Room, Hall, Large Hall)
                 val combSizes = intArrayOf(1557, 1617, 1491, 1422, 1277, 1116)
@@ -512,18 +512,18 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                     val pitchFactor = if (_isSlowedReverbEnabled.value) 0.90 else currentSpeed.toDouble()
 
                     val targetBass = if (_eqEnabled.value) _bassBoostLevel.value else 0f
-                    val targetSurround = if (_eqEnabled.value && _surround360Enabled.value) (_surroundStrength.value * _spatialMode.value.virtualizerStrength) else 0f
+                    val targetSurround = if (_surround360Enabled.value) (_surroundStrength.value * _spatialMode.value.virtualizerStrength) else 0f
                     currentSmoothedBass += (targetBass - currentSmoothedBass) * 0.05f
                     currentSmoothedSurround += (targetSurround - currentSmoothedSurround) * 0.05f
 
                     val bassBoostGain = 1.0 + (currentSmoothedBass * 2.8)
                     val currentSpatialMode = _spatialMode.value
-                    val clarityBoost = if (_surround360Enabled.value && _eqEnabled.value) currentSpatialMode.centerClarityBoost else 0f
+                    val clarityBoost = if (_surround360Enabled.value) currentSpatialMode.centerClarityBoost else 0f
                     val eqLow = if (_eqEnabled.value) (1.0 + (_bandGains.value.getOrElse(0) { 0f } / 12.0) * 0.8) else 1.0
-                    val eqMid = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(2) { 0f } / 12.0) + clarityBoost) * 0.8) else 1.0
-                    val eqHigh = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(4) { 0f } / 12.0) + (clarityBoost * 0.5f)) * 0.8) else 1.0
+                    val eqMid = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(2) { 0f } / 12.0) + clarityBoost) * 0.8) else (1.0 + clarityBoost * 0.8)
+                    val eqHigh = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(4) { 0f } / 12.0) + (clarityBoost * 0.5f)) * 0.8) else (1.0 + clarityBoost * 0.5f * 0.8)
 
-                    val activeReverb = if (_eqEnabled.value) _selectedReverb.value else ReverbEffect.OFF
+                    val activeReverb = _selectedReverb.value
                     val (reverbFeedback, reverbWet) = when (activeReverb) {
                         ReverbEffect.ROOM -> Pair(0.68f, 0.45f)
                         ReverbEffect.HALL -> Pair(0.82f, 0.65f)
@@ -588,13 +588,16 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                             reverbAccumulator = (reverbAccumulator / combSizes.size) * reverbWet * 1.8f
                         }
 
-                        // Advanced 360° Spherical Orbit Phase Calculation
-                        val orbitAngle = (currentSample * 2.0 * Math.PI * 0.18 / sampleRate)
-                        val leftOrbit = 1.0 + currentSmoothedSurround * sin(orbitAngle) * 0.75
-                        val rightOrbit = 1.0 - currentSmoothedSurround * sin(orbitAngle) * 0.75
+                        // Advanced 360° Spherical Orbit Phase Calculation (Distinct panning & dimensional width)
+                        val orbitAngle = (currentSample * 2.0 * Math.PI * 0.25 / sampleRate)
+                        val orbitAmount = currentSmoothedSurround * 1.15f
+                        val leftOrbit = (1.0 + orbitAmount * sin(orbitAngle)).coerceIn(0.15, 2.0)
+                        val rightOrbit = (1.0 - orbitAmount * sin(orbitAngle)).coerceIn(0.15, 2.0)
 
-                        val finalLeft = (centerChannel + (spatialSignal * leftOrbit) + reverbAccumulator).coerceIn(-32767.0, 32767.0).toInt().toShort()
-                        val finalRight = (centerChannel + (spatialSignal * rightOrbit) + reverbAccumulator * 0.92).coerceIn(-32767.0, 32767.0).toInt().toShort()
+                        // Mode-specific wide spatial cross-bleed
+                        val crossSpread = if (_surround360Enabled.value) currentSmoothedSurround * 0.40f else 0.0f
+                        val finalLeft = (centerChannel + (spatialSignal * leftOrbit) + (spatialSignal * crossSpread) + reverbAccumulator).coerceIn(-32767.0, 32767.0).toInt().toShort()
+                        val finalRight = (centerChannel + (spatialSignal * rightOrbit) - (spatialSignal * crossSpread * 0.5f) + reverbAccumulator * 0.92).coerceIn(-32767.0, 32767.0).toInt().toShort()
 
                         samples[sampleOutIdx++] = finalLeft
                         samples[sampleOutIdx++] = finalRight
@@ -660,10 +663,14 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             virtualizerFx = null
             if (sessionId != 0) {
                 virtualizerFx = Virtualizer(0, sessionId).apply {
-                    enabled = _eqEnabled.value && _surround360Enabled.value
+                    enabled = _surround360Enabled.value
                     if (strengthSupported) {
-                        setStrength((_surroundStrength.value * 1000).toInt().toShort())
+                        val mode = _spatialMode.value
+                        setStrength((_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort())
                     }
+                    try {
+                        forceVirtualizationMode(Virtualizer.VIRTUALIZATION_MODE_BINAURAL)
+                    } catch (_: Exception) {}
                 }
             }
         } catch (e: Exception) {
@@ -675,19 +682,19 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             presetReverbFx?.release()
             presetReverbFx = null
             presetReverbFx = PresetReverb(0, 0).apply {
-                preset = if (_eqEnabled.value && _selectedReverb.value != ReverbEffect.OFF) _selectedReverb.value.presetValue else PresetReverb.PRESET_NONE
-                enabled = _eqEnabled.value && _selectedReverb.value != ReverbEffect.OFF
+                preset = if (_selectedReverb.value != ReverbEffect.OFF) _selectedReverb.value.presetValue else PresetReverb.PRESET_NONE
+                enabled = _selectedReverb.value != ReverbEffect.OFF
             }
 
             presetReverbFx?.let { reverb ->
                 try {
                     primaryPlayer?.attachAuxEffect(reverb.id)
-                    primaryPlayer?.setAuxEffectSendLevel(if (_eqEnabled.value && _selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
+                    primaryPlayer?.setAuxEffectSendLevel(if (_selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
                 } catch (_: Exception) {}
 
                 try {
                     synthAudioTrack?.attachAuxEffect(reverb.id)
-                    synthAudioTrack?.setAuxEffectSendLevel(if (_eqEnabled.value && _selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
+                    synthAudioTrack?.setAuxEffectSendLevel(if (_selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
                 } catch (_: Exception) {}
             }
         } catch (e: Exception) {
@@ -922,6 +929,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun setBassBoost(level: Float) { // 0.0f to 1.0f
         _bassBoostLevel.value = level
+        if (!_eqEnabled.value && level > 0f) {
+            setEqEnabled(true)
+        }
         if (_eqEnabled.value) {
             try {
                 if (bassBoostFx?.strengthSupported == true) {
@@ -940,19 +950,31 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         newGains[bandIndex] = gainDb
         _bandGains.value = newGains
 
+        if (!_eqEnabled.value) {
+            setEqEnabled(true)
+        }
         applyEqualizerGains()
         if (_selectedPreset.value != EqPreset.CUSTOM) {
             _selectedPreset.value = EqPreset.CUSTOM
         }
     }
 
-    fun selectPreset(preset: EqPreset) {
+    fun selectPreset(preset: EqPreset, enableEqIfOff: Boolean = true) {
         _selectedPreset.value = preset
+        if (enableEqIfOff && !_eqEnabled.value) {
+            setEqEnabled(true)
+        }
         if (preset != EqPreset.CUSTOM) {
             _bandGains.value = preset.gains.copyOf()
             _bassBoostLevel.value = preset.bassBoost
             applyEqualizerGains()
-            setBassBoost(preset.bassBoost)
+            if (_eqEnabled.value) {
+                try {
+                    if (bassBoostFx?.strengthSupported == true) {
+                        bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
+                    }
+                } catch (_: Exception) {}
+            }
         }
         notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
     }
@@ -1036,34 +1058,32 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun setSurround360Enabled(enabled: Boolean) {
         _surround360Enabled.value = enabled
-        if (enabled && !_eqEnabled.value) {
-            setEqEnabled(true)
-        }
-        if (_eqEnabled.value) {
-            try {
-                virtualizerFx?.enabled = enabled
-                if (enabled && virtualizerFx?.strengthSupported == true) {
-                    val mode = _spatialMode.value
-                    val strength = (_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort()
-                    virtualizerFx?.setStrength(strength)
-                }
-                
-                // When 360 sound is enabled, configure acoustics without changing bass boost slider
-                if (enabled) {
-                    val currentMode = _spatialMode.value
-                    if (currentMode == SpatialMode.ARENA_360 && _selectedReverb.value == ReverbEffect.OFF) {
-                        setReverbEffect(ReverbEffect.LARGE_HALL)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.d("AudioPlayerEngine", "Surround 360 toggle error", e)
+        try {
+            virtualizerFx?.enabled = enabled
+            if (enabled && virtualizerFx?.strengthSupported == true) {
+                val mode = _spatialMode.value
+                val strength = (_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort()
+                virtualizerFx?.setStrength(strength)
+                try {
+                    virtualizerFx?.forceVirtualizationMode(Virtualizer.VIRTUALIZATION_MODE_BINAURAL)
+                } catch (_: Exception) {}
             }
+            
+            // When 360 sound is enabled, configure acoustics if needed
+            if (enabled) {
+                val currentMode = _spatialMode.value
+                if (currentMode == SpatialMode.ARENA_360 && _selectedReverb.value == ReverbEffect.OFF) {
+                    setReverbEffect(ReverbEffect.LARGE_HALL)
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("AudioPlayerEngine", "Surround 360 toggle error", e)
         }
     }
 
     fun setSpatialMode(mode: SpatialMode) {
         _spatialMode.value = mode
-        if (_surround360Enabled.value && _eqEnabled.value) {
+        if (_surround360Enabled.value) {
             try {
                 if (virtualizerFx?.strengthSupported == true) {
                     val strength = (_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort()
@@ -1078,10 +1098,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun setSurroundStrength(strength: Float) {
         _surroundStrength.value = strength
-        if (!_eqEnabled.value && _surround360Enabled.value) {
-            setEqEnabled(true)
-        }
-        if (_eqEnabled.value && _surround360Enabled.value) {
+        if (_surround360Enabled.value) {
             try {
                 if (virtualizerFx?.strengthSupported == true) {
                     val mode = _spatialMode.value
@@ -1095,15 +1112,12 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         _isSlowedReverbEnabled.value = enabled
         if (enabled) {
             _playbackSpeed.value = 0.90f
-            if (!_eqEnabled.value) {
-                setEqEnabled(true)
-            }
             setReverbEffect(ReverbEffect.HALL)
-            if (_bassBoostLevel.value < 0.35f) {
-                setBassBoost(0.40f)
-            }
         } else {
             _playbackSpeed.value = 1.0f
+            if (_selectedReverb.value == ReverbEffect.HALL) {
+                setReverbEffect(ReverbEffect.OFF)
+            }
         }
         applyPlaybackSpeed()
     }
@@ -1118,6 +1132,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             }
         } else if (clamped == 1.0f && _isSlowedReverbEnabled.value) {
             _isSlowedReverbEnabled.value = false
+            if (_selectedReverb.value == ReverbEffect.HALL) {
+                setReverbEffect(ReverbEffect.OFF)
+            }
         }
         applyPlaybackSpeed()
     }
@@ -1145,30 +1162,25 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun setReverbEffect(effect: ReverbEffect) {
         _selectedReverb.value = effect
-        if (effect != ReverbEffect.OFF && !_eqEnabled.value) {
-            setEqEnabled(true)
-        }
-        if (_eqEnabled.value) {
-            try {
-                presetReverbFx?.let { reverb ->
-                    if (effect == ReverbEffect.OFF) {
-                        reverb.preset = PresetReverb.PRESET_NONE
-                        reverb.enabled = false
-                    } else {
-                        reverb.preset = effect.presetValue
-                        reverb.enabled = true
-                    }
+        try {
+            presetReverbFx?.let { reverb ->
+                if (effect == ReverbEffect.OFF) {
+                    reverb.preset = PresetReverb.PRESET_NONE
+                    reverb.enabled = false
+                } else {
+                    reverb.preset = effect.presetValue
+                    reverb.enabled = true
                 }
-                val sendLevel = if (effect != ReverbEffect.OFF) 1.0f else 0.0f
-                try {
-                    primaryPlayer?.setAuxEffectSendLevel(sendLevel)
-                } catch (_: Exception) {}
-                try {
-                    synthAudioTrack?.setAuxEffectSendLevel(sendLevel)
-                } catch (_: Exception) {}
-            } catch (e: Exception) {
-                Log.d("AudioPlayerEngine", "Reverb effect error", e)
             }
+            val sendLevel = if (effect != ReverbEffect.OFF) 1.0f else 0.0f
+            try {
+                primaryPlayer?.setAuxEffectSendLevel(sendLevel)
+            } catch (_: Exception) {}
+            try {
+                synthAudioTrack?.setAuxEffectSendLevel(sendLevel)
+            } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.d("AudioPlayerEngine", "Reverb effect error", e)
         }
     }
 

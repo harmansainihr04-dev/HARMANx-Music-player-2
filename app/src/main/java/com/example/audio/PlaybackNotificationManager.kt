@@ -51,7 +51,7 @@ class PlaybackNotificationManager(private val context: Context) {
 
     private fun loadTrackThumbnail(track: Track): Bitmap? {
         try {
-            // 1. Try MediaStore album art on Android 10+ (Q+)
+            // 1. Try MediaStore album art on Android 10+ (Q+) or content stream
             if (track.albumId > 0) {
                 val albumUri = ContentUris.withAppendedId(
                     Uri.parse("content://media/external/audio/albumart"),
@@ -66,20 +66,6 @@ class PlaybackNotificationManager(private val context: Context) {
                         }
                     }
                 } catch (_: Exception) {}
-            }
-
-            // 2. Try MediaMetadataRetriever from direct URI
-            if (track.audioPath.startsWith("content://")) {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(context, Uri.parse(track.audioPath))
-                    val artBytes = retriever.embeddedPicture
-                    if (artBytes != null && artBytes.isNotEmpty()) {
-                        return BitmapFactory.decodeByteArray(artBytes, 0, artBytes.size)
-                    }
-                } catch (_: Exception) {} finally {
-                    try { retriever.release() } catch (_: Exception) {}
-                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load album art for notification", e)

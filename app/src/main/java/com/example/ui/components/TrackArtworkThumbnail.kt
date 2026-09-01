@@ -41,19 +41,13 @@ fun TrackArtworkThumbnail(
     val context = LocalContext.current
     var isImageLoadFailed by remember(track.id, track.albumId, track.audioPath) { mutableStateOf(false) }
 
-    // Build actual artwork URI from MediaStore or embedded track
-    val artworkUri: Uri? = remember(track.id, track.albumId, track.audioPath) {
+    // Build actual artwork URI from MediaStore album art if available
+    val artworkUri: Uri? = remember(track.id, track.albumId) {
         if (track.albumId > 0) {
             ContentUris.withAppendedId(
                 Uri.parse("content://media/external/audio/albumart"),
                 track.albumId
             )
-        } else if (track.audioPath.startsWith("content://")) {
-            try {
-                Uri.parse(track.audioPath)
-            } catch (_: Exception) {
-                null
-            }
         } else {
             null
         }
