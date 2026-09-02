@@ -9,6 +9,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
+import android.graphics.Typeface
 import android.media.MediaMetadata
 import android.media.MediaMetadataRetriever
 import android.media.session.MediaSession
@@ -16,6 +21,7 @@ import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
 import android.util.Size
 import com.example.MainActivity
@@ -49,28 +55,94 @@ class PlaybackNotificationManager(private val context: Context) {
         initMediaSession()
     }
 
-    private fun loadTrackThumbnail(track: Track): Bitmap? {
+    private fun loadTrackThumbnail(track: Track): Bitmap {
+        // 1. Try embedded picture from MediaMetadataRetriever (works directly on audio file tags)
         try {
-            // 1. Try MediaStore album art on Android 10+ (Q+) or content stream
+            val mmr = MediaMetadataRetriever()
+            try {
+                if (track.audioPath.startsWith("content://")) {
+                    mmr.setDataSource(context, Uri.parse(track.audioPath))
+                } else if (track.audioPath.isNotEmpty() && !track.audioPath.startsWith("synth_flac_")) {
+                    mmr.setDataSource(track.audioPath)
+                }
+                val rawPicture = mmr.embeddedPicture
+                if (rawPicture != null && rawPicture.isNotEmpty()) {
+                    val bitmap = BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size)
+                    if (bitmap != null) {
+                        return bitmap
+                    }
+                }
+            } finally {
+                try {
+                    mmr.release()
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+
+        // 2. Try MediaStore external audio item / albumart content resolver
+        try {
+            if (track.id > 0) {
+                val trackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, track.id)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        val bitmap = context.contentResolver.loadThumbnail(trackUri, Size(512, 512), null)
+                        if (bitmap != null) return bitmap
+                    } catch (_: Exception) {}
+                }
+            }
+
             if (track.albumId > 0) {
                 val albumUri = ContentUris.withAppendedId(
                     Uri.parse("content://media/external/audio/albumart"),
                     track.albumId
                 )
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        return context.contentResolver.loadThumbnail(albumUri, Size(512, 512), null)
-                    } else {
-                        context.contentResolver.openInputStream(albumUri)?.use { input ->
-                            return BitmapFactory.decodeStream(input)
-                        }
-                    }
-                } catch (_: Exception) {}
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        val bitmap = context.contentResolver.loadThumbnail(albumUri, Size(512, 512), null)
+                        if (bitmap != null) return bitmap
+                    } catch (_: Exception) {}
+                }
+                context.contentResolver.openInputStream(albumUri)?.use { input ->
+                    val bitmap = BitmapFactory.decodeStream(input)
+                    if (bitmap != null) return bitmap
+                }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to load album art for notification", e)
+        } catch (_: Exception) {}
+
+        // 3. Fallback: Generate high-resolution vibrant gradient album art
+        return generateGradientThumbnail(track)
+    }
+
+    private fun generateGradientThumbnail(track: Track): Bitmap {
+        val size = 512
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val colors = when (track.artworkColorIndex % 5) {
+            0 -> intArrayOf(0xFF00E5FF.toInt(), 0xFF7C4DFF.toInt())
+            1 -> intArrayOf(0xFFFF3D00.toInt(), 0xFFFFB703.toInt())
+            2 -> intArrayOf(0xFF00E676.toInt(), 0xFF00B0FF.toInt())
+            3 -> intArrayOf(0xFFD500F9.toInt(), 0xFF651FFF.toInt())
+            else -> intArrayOf(0xFF7C4DFF.toInt(), 0xFF00E5FF.toInt())
         }
-        return null
+        val shader = LinearGradient(0f, 0f, size.toFloat(), size.toFloat(), colors, null, Shader.TileMode.CLAMP)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.shader = shader
+        }
+        canvas.drawRect(0f, 0f, size.toFloat(), size.toFloat(), paint)
+
+        // Draw initial letter or musical note in center
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 190f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val initial = track.title.trim().take(1).uppercase().ifEmpty { "♫" }
+        val yPos = (canvas.height / 2f) - ((textPaint.descent() + textPaint.ascent()) / 2f)
+        canvas.drawText(initial, canvas.width / 2f, yPos, textPaint)
+
+        return bitmap
     }
 
     private fun initMediaSession(): MediaSession {
@@ -266,6 +338,7 @@ class PlaybackNotificationManager(private val context: Context) {
             if (albumBitmap != null) {
                 metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, albumBitmap)
                 metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_ART, albumBitmap)
+                metadataBuilder.putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, albumBitmap)
             }
 
             session.setMetadata(metadataBuilder.build())
