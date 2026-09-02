@@ -44,33 +44,51 @@ class MusicRepository(
                 }
             }
 
-            // Automatically detect device music folders and sync them into Playlists
+            // Automatically detect device music folders and cleanly sync them into Playlists
             val existingPlaylists = playlistDao.getAllPlaylists().firstOrNull() ?: emptyList()
+            val currentFolderPlaylistNames = mutableSetOf<String>()
+
             scanResult.folderMap.forEach { (folderName, folderTracks) ->
                 if (folderTracks.isNotEmpty()) {
                     val playlistName = "📁 $folderName"
+                    currentFolderPlaylistNames.add(playlistName.lowercase())
+
                     val existingPlaylist = existingPlaylists.find {
                         it.name.equals(playlistName, ignoreCase = true) || it.name.equals(folderName, ignoreCase = true)
                     }
+
                     val playlistId = if (existingPlaylist == null) {
                         val colorIdx = (folderName.hashCode().let { if (it < 0) -it else it }) % 4
                         playlistDao.insertPlaylist(
                             Playlist(
                                 name = playlistName,
-                                description = "Auto-synced folder (${folderTracks.size} songs)",
+                                description = "${folderTracks.size} songs",
                                 coverGradientIndex = colorIdx,
                                 isSystemPlaylist = false
                             )
                         )
                     } else {
+                        playlistDao.updatePlaylist(
+                            existingPlaylist.copy(
+                                name = playlistName,
+                                description = "${folderTracks.size} songs"
+                            )
+                        )
                         existingPlaylist.id
                     }
 
-                    // Add folder tracks to this playlist
-                    for (track in folderTracks) {
+                    // Reset and refresh playlist tracks to prevent overlap across re-scans
+                    playlistDao.clearTracksForPlaylist(playlistId)
+                    folderTracks.forEachIndexed { index, track ->
                         val dbTrack = trackDao.getTrackByPath(track.audioPath)
                         if (dbTrack != null) {
-                            playlistDao.addTrackToPlaylist(PlaylistTrackCrossRef(playlistId, dbTrack.id))
+                            playlistDao.addTrackToPlaylist(
+                                PlaylistTrackCrossRef(
+                                    playlistId = playlistId,
+                                    trackId = dbTrack.id,
+                                    orderPosition = index
+                                )
+                            )
                         }
                     }
                 }

@@ -234,8 +234,11 @@ fun AuraMusicApp(
                     tonalElevation = 8.dp
                 ) {
                     NavigationBarItem(
-                        selected = selectedTab == NavTab.LIBRARY,
-                        onClick = { selectedTab = NavTab.LIBRARY },
+                        selected = selectedTab == NavTab.LIBRARY && !isFullPlayerVisible,
+                        onClick = {
+                            selectedTab = NavTab.LIBRARY
+                            isFullPlayerVisible = false
+                        },
                         icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
                         label = { Text("Library", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
@@ -249,8 +252,11 @@ fun AuraMusicApp(
                     )
 
                     NavigationBarItem(
-                        selected = selectedTab == NavTab.PLAYLISTS,
-                        onClick = { selectedTab = NavTab.PLAYLISTS },
+                        selected = selectedTab == NavTab.PLAYLISTS && !isFullPlayerVisible,
+                        onClick = {
+                            selectedTab = NavTab.PLAYLISTS
+                            isFullPlayerVisible = false
+                        },
                         icon = { Icon(Icons.Default.PlaylistPlay, contentDescription = "Playlists") },
                         label = { Text("Playlists", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
@@ -264,8 +270,11 @@ fun AuraMusicApp(
                     )
 
                     NavigationBarItem(
-                        selected = selectedTab == NavTab.EQUALIZER,
-                        onClick = { selectedTab = NavTab.EQUALIZER },
+                        selected = selectedTab == NavTab.EQUALIZER && !isFullPlayerVisible,
+                        onClick = {
+                            selectedTab = NavTab.EQUALIZER
+                            isFullPlayerVisible = false
+                        },
                         icon = { Icon(Icons.Default.Equalizer, contentDescription = "Equalizer") },
                         label = { Text("Equalizer", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
@@ -279,8 +288,11 @@ fun AuraMusicApp(
                     )
 
                     NavigationBarItem(
-                        selected = selectedTab == NavTab.SETTINGS,
-                        onClick = { selectedTab = NavTab.SETTINGS },
+                        selected = selectedTab == NavTab.SETTINGS && !isFullPlayerVisible,
+                        onClick = {
+                            selectedTab = NavTab.SETTINGS
+                            isFullPlayerVisible = false
+                        },
                         icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                         label = { Text("Settings", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
@@ -396,7 +408,10 @@ fun AuraMusicApp(
                 onToggleGapless = { viewModel.toggleGaplessMode() },
                 onToggleSlowedReverb = { viewModel.setSlowedReverbEnabled(!isSlowedReverbEnabled) },
                 onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                onOpenEqualizer = { selectedTab = NavTab.EQUALIZER }
+                onOpenEqualizer = {
+                    selectedTab = NavTab.EQUALIZER
+                    isFullPlayerVisible = false
+                }
             )
         }
     }

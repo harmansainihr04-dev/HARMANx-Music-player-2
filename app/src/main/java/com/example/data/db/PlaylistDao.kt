@@ -30,6 +30,9 @@ interface PlaylistDao {
     @Query("DELETE FROM playlist_track_cross_ref WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: Long)
 
+    @Query("DELETE FROM playlist_track_cross_ref WHERE playlistId = :playlistId")
+    suspend fun clearTracksForPlaylist(playlistId: Long)
+
     @Query("""
         SELECT t.* FROM tracks t 
         INNER JOIN playlist_track_cross_ref ref ON t.id = ref.trackId 

@@ -657,7 +657,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             Log.d("AudioPlayerEngine", "BassBoost FX init info", e)
         }
 
-        // Safely initialize 360 Virtualizer
+        // Safely initialize 360 Virtualizer (Original High-Definition Hardware Virtualizer)
         try {
             virtualizerFx?.release()
             virtualizerFx = null
@@ -668,9 +668,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                         val mode = _spatialMode.value
                         setStrength((_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort())
                     }
-                    try {
-                        forceVirtualizationMode(Virtualizer.VIRTUALIZATION_MODE_BINAURAL)
-                    } catch (_: Exception) {}
                 }
             }
         } catch (e: Exception) {
@@ -1064,9 +1061,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 val mode = _spatialMode.value
                 val strength = (_surroundStrength.value * mode.virtualizerStrength * 1000).toInt().toShort()
                 virtualizerFx?.setStrength(strength)
-                try {
-                    virtualizerFx?.forceVirtualizationMode(Virtualizer.VIRTUALIZATION_MODE_BINAURAL)
-                } catch (_: Exception) {}
             }
             
             // When 360 sound is enabled, configure acoustics if needed
