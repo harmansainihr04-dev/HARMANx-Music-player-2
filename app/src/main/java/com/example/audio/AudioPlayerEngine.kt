@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
 import kotlin.math.sin
 
@@ -95,7 +96,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var primaryPlayer: MediaPlayer? = null
-    private var nextPlayer: MediaPlayer? = null
+    private var currentTrimBounds: AudioSilenceDetector.TrimBounds? = null
+    private var silenceAnalysisJob: Job? = null
     
     private var equalizerFx: Equalizer? = null
     private var bassBoostFx: BassBoost? = null
@@ -141,7 +143,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val _repeatMode = MutableStateFlow(RepeatMode.OFF)
     val repeatMode: StateFlow<RepeatMode> = _repeatMode.asStateFlow()
 
-    private val _isGaplessEnabled = MutableStateFlow(true)
+    private val _isGaplessEnabled = MutableStateFlow(false)
     val isGaplessEnabled: StateFlow<Boolean> = _isGaplessEnabled.asStateFlow()
 
     // Equalizer State (Default: OFF)
@@ -192,29 +194,53 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         override fun run() {
             primaryPlayer?.let { player ->
                 if (player.isPlaying) {
-                    _currentPositionMs.value = player.currentPosition.toLong()
-                    _durationMs.value = player.duration.toLong()
+                    val curPos = player.currentPosition.toLong()
+                    val dur = player.duration.toLong()
+                    _currentPositionMs.value = curPos
+                    _durationMs.value = dur
                     
                     // Periodically persist playback position every ~2 seconds
-                    val pos = _currentPositionMs.value
-                    if (Math.abs(pos - lastSavedPosition) >= 2000) {
-                        lastSavedPosition = pos
-                        savePlaybackState(pos)
+                    if (Math.abs(curPos - lastSavedPosition) >= 2000) {
+                        lastSavedPosition = curPos
+                        savePlaybackState(curPos)
+                    }
+
+                    // Gapless Mode: Cut trailing dead air when voice note / audio sound ends
+                    if (_isGaplessEnabled.value && dur > 3000L) {
+                        val bounds = currentTrimBounds
+                        val outroCutPoint = bounds?.outroEndMs ?: (dur - 1200L)
+                        if (curPos >= outroCutPoint && curPos < dur) {
+                            Log.d("AudioPlayerEngine", "Gapless active: Voice note finished at ${curPos}ms (total ${dur}ms). Cutting remaining duration & playing next song.")
+                            playNext()
+                        }
                     }
                 }
             } ?: run {
                 if (isSynthPlaying) {
-                    _currentPositionMs.value = (_currentPositionMs.value + 200).coerceAtMost(_durationMs.value)
-                    if (_currentPositionMs.value >= _durationMs.value) {
+                    val newPos = (_currentPositionMs.value + 200).coerceAtMost(_durationMs.value)
+                    _currentPositionMs.value = newPos
+                    val dur = _durationMs.value
+                    if (_isGaplessEnabled.value && dur > 3000L) {
+                        val bounds = currentTrimBounds
+                        val outroCutPoint = bounds?.outroEndMs ?: (dur - 1500L)
+                        if (newPos >= outroCutPoint) {
+                            Log.d("AudioPlayerEngine", "Gapless active (synth): Voice note finished at ${newPos}ms. Cutting remaining duration & playing next song.")
+                            playNext()
+                        } else if (newPos >= dur) {
+                            onTrackCompleted()
+                        }
+                    } else if (newPos >= dur) {
                         onTrackCompleted()
                     }
                 }
             }
-            handler.postDelayed(this, 200)
+            handler.postDelayed(this, 150)
         }
     }
 
     init {
+        val savedGapless = prefs.getBoolean("gapless_enabled", false)
+        _isGaplessEnabled.value = savedGapless
         handler.post(progressUpdater)
         PlaybackControlReceiver.audioPlayerEngine = this
         restoreLastPlaybackState()
@@ -368,11 +394,47 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     fun playTrack(track: Track, startPositionMs: Long = 0L) {
         _currentTrack.value = track
         _durationMs.value = track.durationMs
-        _currentPositionMs.value = startPositionMs
+
+        // If Gapless Mode is toggled ON: cut leading dead air/silence if starting from 0
+        var actualStartMs = startPositionMs
+        if (_isGaplessEnabled.value && startPositionMs == 0L) {
+            val cached = AudioSilenceDetector.getCached(track.audioPath)
+            if (cached != null && cached.introStartMs > 100L) {
+                actualStartMs = cached.introStartMs
+                Log.d("AudioPlayerEngine", "Gapless active: Cut ${cached.introStartMs}ms intro silence. Starting voice note directly.")
+            }
+        }
+
+        _currentPositionMs.value = actualStartMs
 
         stopPlayback()
         requestAudioFocus()
         registerBecomingNoisyReceiver()
+
+        // Background silence & voice-note analysis for current and upcoming track
+        silenceAnalysisJob?.cancel()
+        silenceAnalysisJob = engineScope.launch {
+            val bounds = AudioSilenceDetector.analyzeTrack(context, track.audioPath, track.durationMs)
+            currentTrimBounds = bounds
+            
+            // If Gapless is ON, started at 0, and analysis found leading dead air:
+            // Fast-forward straight to first voice note if playback hasn't crossed it yet
+            if (_isGaplessEnabled.value && startPositionMs == 0L && bounds.introStartMs > 150L) {
+                withContext(Dispatchers.Main) {
+                    primaryPlayer?.let { player ->
+                        if (player.isPlaying && player.currentPosition < bounds.introStartMs) {
+                            Log.d("AudioPlayerEngine", "Gapless active: Fast-forwarding past ${bounds.introStartMs}ms intro silence to first voice note.")
+                            seekTo(bounds.introStartMs)
+                        }
+                    }
+                }
+            }
+
+            // Pre-analyze upcoming track so its silence bounds are cached in advance
+            getNextTrack()?.let { next ->
+                AudioSilenceDetector.analyzeTrack(context, next.audioPath, next.durationMs)
+            }
+        }
 
         try {
             val uri = Uri.parse(track.audioPath)
@@ -386,8 +448,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                     )
                     setDataSource(context, uri)
                     prepare()
-                    if (startPositionMs > 0 && startPositionMs < track.durationMs) {
-                        seekTo(startPositionMs.toInt())
+                    if (actualStartMs > 0 && actualStartMs < track.durationMs) {
+                        seekTo(actualStartMs.toInt())
                     }
                     start()
                 }
@@ -397,11 +459,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 applyPlaybackSpeed()
                 player.setOnCompletionListener { onTrackCompleted() }
                 notifyPlaybackState()
-
-                // Setup Gapless pre-loader if next track exists
-                if (_isGaplessEnabled.value) {
-                    prepareNextPlayerForGapless()
-                }
             } else {
                 // High-resolution synthesized audio mode for sample FLAC demonstration
                 playSynthFlacAudio(track)
@@ -409,29 +466,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         } catch (e: Exception) {
             Log.e("AudioPlayerEngine", "Error playing media file, fallback to synth generator", e)
             playSynthFlacAudio(track)
-        }
-    }
-
-    private fun prepareNextPlayerForGapless() {
-        val nextTrack = getNextTrack() ?: return
-        try {
-            val uri = Uri.parse(nextTrack.audioPath)
-            if (nextTrack.audioPath.startsWith("content://") || nextTrack.audioPath.startsWith("file://")) {
-                nextPlayer?.release()
-                nextPlayer = MediaPlayer().apply {
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .build()
-                    )
-                    setDataSource(context, uri)
-                    prepare()
-                }
-                primaryPlayer?.setNextMediaPlayer(nextPlayer)
-            }
-        } catch (e: Exception) {
-            Log.d("AudioPlayerEngine", "Gapless next player prep skipped", e)
         }
     }
 
@@ -861,6 +895,22 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun toggleGaplessMode() {
         _isGaplessEnabled.value = !_isGaplessEnabled.value
+        prefs.edit().putBoolean("gapless_enabled", _isGaplessEnabled.value).apply()
+        if (_isGaplessEnabled.value) {
+            // Trigger pre-analysis of current and upcoming track for instant silence cutting
+            _currentTrack.value?.let { track ->
+                engineScope.launch {
+                    currentTrimBounds = AudioSilenceDetector.analyzeTrack(context, track.audioPath, track.durationMs)
+                }
+            }
+            getNextTrack()?.let { next ->
+                engineScope.launch {
+                    AudioSilenceDetector.analyzeTrack(context, next.audioPath, next.durationMs)
+                }
+            }
+        } else {
+            currentTrimBounds = null
+        }
     }
 
     // Equalizer Controls with Smooth Cross-Fade Transitions
@@ -1029,6 +1079,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         unregisterBecomingNoisyReceiver()
         abandonAudioFocus()
 
+        silenceAnalysisJob?.cancel()
         isSynthPlaying = false
         synthAudioTrack?.let {
             try {
@@ -1045,9 +1096,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             } catch (_: Exception) {}
         }
         primaryPlayer = null
-
-        nextPlayer?.release()
-        nextPlayer = null
 
         _isPlaying.value = false
         notificationManager.cancelNotification()
