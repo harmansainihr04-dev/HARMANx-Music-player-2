@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,10 +19,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -223,11 +229,51 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary)
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                SpecRow("Car Dashboard Display", "Enabled ✓")
-                SpecRow("Steering Wheel Controls", "Enabled ✓")
-                SpecRow("Voice Media Commands", "Enabled ✓")
+                Text(
+                    text = "How to enable Unknown Sources for Android Auto:",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = CyberTextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                val autoSteps = listOf(
+                    "Open the Settings app on your phone.",
+                    "Go to Connected devices or search for Android Auto.",
+                    "Scroll down to the bottom of the Android Auto settings page to find the Version section.",
+                    "Tap on the Version number 10 times until a message pops up confirming that developer settings are enabled.",
+                    "Tap the three-dot menu in the top-right corner of the screen and select Developer settings.",
+                    "Scroll down and check the box next to Unknown sources.",
+                    "Close developer mode (optional).",
+                    "Restart your phone and reconnect it to your car."
+                )
+
+                autoSteps.forEachIndexed { index, step ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = "${index + 1}.",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = CyberNeonCyan
+                            ),
+                            modifier = Modifier.width(20.dp)
+                        )
+                        Text(
+                            text = step,
+                            style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
 
@@ -293,6 +339,79 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Background Playback & Battery Optimization Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp)),
+            colors = CardDefaults.cardColors(containerColor = CyberSurfaceDark)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.BatteryChargingFull,
+                        contentDescription = null,
+                        tint = CyberNeonCyan,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "BACKGROUND PLAYBACK PROTECTION",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = CyberNeonCyan,
+                            letterSpacing = 1.sp
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Foreground Service with CPU WakeLock is active. To prevent Android battery saver or OEM task killer from pausing/killing music when the screen is locked or apps are switched, tap below to set battery usage to Unrestricted.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val context = LocalContext.current
+                Button(
+                    onClick = {
+                        try {
+                            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            try {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CyberNeonCyan.copy(alpha = 0.15f),
+                        contentColor = CyberNeonCyan
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyberNeonCyan.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_battery_opt_btn")
+                ) {
+                    Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(18.dp), tint = CyberNeonCyan)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Battery Optimization Settings", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Info Card
         Surface(
             modifier = Modifier
@@ -312,7 +431,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "HARMANX Music Player v1.0 • Offline High-Res MP3 & Audio Engine",
+                    text = "HARMANX Music Player • High-Res Offline Audio Engine",
                     style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
                 )
             }

@@ -351,7 +351,7 @@ fun AuraMusicApp(
                     onCreatePlaylist = { name, desc, colorIdx -> viewModel.createPlaylist(name, desc, colorIdx) },
                     onDeletePlaylist = { playlistId -> viewModel.deletePlaylist(playlistId) },
                     onGetPlaylistTracks = { playlistId -> viewModel.getTracksForPlaylist(playlistId) },
-                    onPlayPlaylistTracks = { playlistTracks -> viewModel.playTrackList(playlistTracks) },
+                    onPlayPlaylistTracks = { playlistTracks, startIndex -> viewModel.playTrackList(playlistTracks, startIndex) },
                     onTrackClick = { track -> viewModel.playSingleTrack(track) },
                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
                     onRemoveTrackFromPlaylist = { playlistId, trackId -> viewModel.removeTrackFromPlaylist(playlistId, trackId) }

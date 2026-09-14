@@ -83,7 +83,7 @@ fun PlaylistsScreen(
     onCreatePlaylist: (String, String, Int) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
     onGetPlaylistTracks: (Long) -> Flow<List<Track>>,
-    onPlayPlaylistTracks: (List<Track>) -> Unit,
+    onPlayPlaylistTracks: (List<Track>, Int) -> Unit,
     onTrackClick: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onRemoveTrackFromPlaylist: (Long, Long) -> Unit,
@@ -387,7 +387,7 @@ fun PlaylistsScreen(
                         if (playlistTracks.isNotEmpty()) {
                             Button(
                                 onClick = {
-                                    onPlayPlaylistTracks(playlistTracks)
+                                    onPlayPlaylistTracks(playlistTracks, 0)
                                     selectedPlaylistForDetail = null
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = CyberNeonCyan, contentColor = Color.Black),
@@ -424,7 +424,14 @@ fun PlaylistsScreen(
                                         TrackItemCard(
                                             track = track,
                                             isPlaying = currentPlayingTrack?.id == track.id && isPlaying,
-                                            onTrackClick = { onTrackClick(track) },
+                                            onTrackClick = {
+                                                val index = playlistTracks.indexOfFirst { it.id == track.id }
+                                                if (index != -1) {
+                                                    onPlayPlaylistTracks(playlistTracks, index)
+                                                } else {
+                                                    onTrackClick(track)
+                                                }
+                                            },
                                             onToggleFavorite = { onToggleFavorite(track) }
                                         )
                                     }

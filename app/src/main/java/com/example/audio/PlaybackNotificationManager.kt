@@ -401,6 +401,18 @@ class PlaybackNotificationManager(private val context: Context) {
             Log.e(TAG, "Error updating MediaSession state", e)
         }
 
+        val notification = buildNotification(track, isPlaying, currentPositionMs)
+        try {
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            // Permission for POST_NOTIFICATIONS might not be granted yet
+        }
+    }
+
+    fun buildNotification(track: Track, isPlaying: Boolean, currentPositionMs: Long = 0L): Notification {
+        // Extract real artwork bitmap if present
+        val albumBitmap = loadTrackThumbnail(track)
+
         // Content Intent (Open App on tap)
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -489,11 +501,32 @@ class PlaybackNotificationManager(private val context: Context) {
             )
         }
 
-        try {
-            notificationManager.notify(NOTIFICATION_ID, builder.build())
-        } catch (e: Exception) {
-            // Permission for POST_NOTIFICATIONS might not be granted yet
+        return builder.build()
+    }
+
+    fun buildFallbackNotification(): Notification {
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
+        val pendingOpenApp = PendingIntent.getActivity(
+            context,
+            0,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(context, CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(context)
+        }
+        return builder.setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("HARMANX Music Player")
+            .setContentText("Background Audio Service Active")
+            .setContentIntent(pendingOpenApp)
+            .setOngoing(true)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .build()
     }
 
     fun cancelNotification() {

@@ -1,8 +1,11 @@
 package com.example.audio
 
+import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.MediaDescription
 import android.media.browse.MediaBrowser
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.service.media.MediaBrowserService
 import android.util.Log
@@ -11,6 +14,7 @@ import com.example.data.model.Playlist
 import com.example.data.model.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
@@ -23,6 +27,8 @@ class HarmanxMediaBrowserService : MediaBrowserService() {
 
     private lateinit var audioPlayerEngine: AudioPlayerEngine
     private lateinit var database: AuraDatabase
+    private var isForeground = false
+    private var playbackObserverJob: Job? = null
 
     companion object {
         private const val TAG = "HarmanxMediaService"
@@ -46,12 +52,76 @@ class HarmanxMediaBrowserService : MediaBrowserService() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "HarmanxMediaBrowserService created for Android Auto")
+        Log.d(TAG, "HarmanxMediaBrowserService created for Android Auto and background playback")
         audioPlayerEngine = AudioPlayerEngine.getInstance(applicationContext)
         database = AuraDatabase.getInstance(applicationContext)
 
         // Set session token so Android Auto / MediaControllers can control playback
         sessionToken = audioPlayerEngine.getMediaSession().sessionToken
+
+        observePlaybackForForeground()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startServiceInForeground()
+        return START_STICKY
+    }
+
+    private fun startServiceInForeground() {
+        try {
+            val track = audioPlayerEngine.currentTrack.value
+            val isPlaying = audioPlayerEngine.isPlaying.value
+            val positionMs = audioPlayerEngine.currentPositionMs.value
+
+            val notification = if (track != null) {
+                audioPlayerEngine.getNotificationManager().buildNotification(
+                    track = track,
+                    isPlaying = isPlaying,
+                    currentPositionMs = positionMs
+                )
+            } else {
+                audioPlayerEngine.getNotificationManager().buildFallbackNotification()
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    PlaybackNotificationManager.NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(PlaybackNotificationManager.NOTIFICATION_ID, notification)
+            }
+            isForeground = true
+            Log.d(TAG, "HarmanxMediaBrowserService safely running in foreground (track=${track?.title}, isPlaying=$isPlaying)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to startForeground in service", e)
+        }
+    }
+
+    private fun observePlaybackForForeground() {
+        playbackObserverJob?.cancel()
+        playbackObserverJob = serviceScope.launch {
+            audioPlayerEngine.isPlaying.collect { isPlaying ->
+                val track = audioPlayerEngine.currentTrack.value
+                if (track != null) {
+                    startServiceInForeground()
+                } else if (isForeground) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stopForeground(true)
+                        }
+                        isForeground = false
+                        Log.d(TAG, "Service exited foreground playback (no active track)")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to stopForeground", e)
+                    }
+                }
+            }
+        }
     }
 
     override fun onGetRoot(
@@ -280,6 +350,22 @@ class HarmanxMediaBrowserService : MediaBrowserService() {
             .setMediaUri(Uri.parse(this.audioPath))
             .build()
         return MediaBrowser.MediaItem(description, MediaBrowser.MediaItem.FLAG_PLAYABLE)
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "onTaskRemoved called - app swiped away from recents. Stopping playback.")
+        
+        audioPlayerEngine.stopPlayback()
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        
+        stopSelf()
     }
 
     override fun onDestroy() {

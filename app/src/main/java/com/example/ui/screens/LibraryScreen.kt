@@ -4,11 +4,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -50,18 +54,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.example.data.model.Playlist
 import com.example.data.model.Track
 import com.example.ui.components.TrackItemCard
@@ -334,28 +344,182 @@ fun LibraryScreen(
                 }
             }
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f)
+            val listState = rememberLazyListState()
+            val coroutineScope = rememberCoroutineScope()
+            var activeLetter by remember { mutableStateOf<String?>(null) }
+            var dismissJob by remember { mutableStateOf<Job?>(null) }
+            val alphabet = remember { listOf("#") + ('A'..'Z').map { it.toString() } }
+            val presentLetters = remember(tracks) {
+                tracks.map { track ->
+                    val firstChar = track.title.trim().firstOrNull()?.uppercaseChar() ?: '#'
+                    if (firstChar in 'A'..'Z') firstChar.toString() else "#"
+                }.toSet()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
             ) {
-                items(tracks, key = { it.id }) { track ->
-                    val isThisPlaying = currentPlayingTrack?.id == track.id && isPlaying
-                    TrackItemCard(
-                        track = track,
-                        isPlaying = isThisPlaying,
-                        onTrackClick = { onTrackClick(track) },
-                        onToggleFavorite = { onToggleFavorite(track) },
-                        playlists = playlists,
-                        onAddToPlaylist = { playlistId -> onAddToPlaylist(playlistId, track.id) },
-                        onDeleteTrack = { onDeleteTrack(track) }
-                    )
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 28.dp)
+                ) {
+                    items(tracks, key = { it.id }) { track ->
+                        val isThisPlaying = currentPlayingTrack?.id == track.id && isPlaying
+                        TrackItemCard(
+                            track = track,
+                            isPlaying = isThisPlaying,
+                            onTrackClick = { onTrackClick(track) },
+                            onToggleFavorite = { onToggleFavorite(track) },
+                            playlists = playlists,
+                            onAddToPlaylist = { playlistId -> onAddToPlaylist(playlistId, track.id) },
+                            onDeleteTrack = { onDeleteTrack(track) }
+                        )
+                    }
+
+                    item {
+                        Spacer(modifier = Modifier.height(80.dp))
+                    }
                 }
 
-                item {
-                    Spacer(modifier = Modifier.height(80.dp))
+                // Vertical Alphabet Fast Scroller Strip
+                AlphabetFastScroller(
+                    alphabet = alphabet,
+                    presentLetters = presentLetters,
+                    activeLetter = activeLetter,
+                    onLetterSelect = { letter ->
+                        activeLetter = letter
+                        dismissJob?.cancel()
+                        dismissJob = coroutineScope.launch {
+                            delay(900)
+                            activeLetter = null
+                        }
+
+                        val targetIndex = if (letter == "#") {
+                            tracks.indexOfFirst {
+                                val firstCh = it.title.trim().firstOrNull()
+                                firstCh == null || !firstCh.isLetter()
+                            }
+                        } else {
+                            val charUpper = letter.first()
+                            val exact = tracks.indexOfFirst { it.title.trim().startsWith(charUpper, ignoreCase = true) }
+                            if (exact >= 0) exact else {
+                                tracks.indexOfFirst { (it.title.trim().firstOrNull()?.uppercaseChar() ?: ' ') >= charUpper }
+                            }
+                        }
+                        if (targetIndex >= 0) {
+                            coroutineScope.launch {
+                                listState.scrollToItem(targetIndex)
+                            }
+                        }
+                    },
+                    onDismissBubble = {
+                        dismissJob?.cancel()
+                        dismissJob = coroutineScope.launch {
+                            delay(600)
+                            activeLetter = null
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(bottom = 70.dp)
+                )
+
+                // Large Letter Preview Indicator Bubble
+                activeLetter?.let { letter ->
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = CyberSurfaceDark.copy(alpha = 0.95f),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, CyberNeonCyan),
+                        shadowElevation = 12.dp,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(76.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = letter,
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    color = CyberNeonCyan,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 36.sp
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
     }
 }
+}
+
+@Composable
+fun AlphabetFastScroller(
+    alphabet: List<String>,
+    presentLetters: Set<String>,
+    activeLetter: String?,
+    onLetterSelect: (String) -> Unit,
+    onDismissBubble: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var stripHeight by remember { mutableStateOf(1f) }
+
+    Column(
+        modifier = modifier
+            .width(26.dp)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(12.dp))
+            .background(CyberSurfaceDark.copy(alpha = 0.75f))
+            .border(1.dp, CyberSurfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(vertical = 4.dp)
+            .testTag("alphabet_fast_scroller")
+            .onGloballyPositioned { coordinates ->
+                if (coordinates.size.height > 0) {
+                    stripHeight = coordinates.size.height.toFloat()
+                }
+            }
+            .pointerInput(alphabet) {
+                detectTapGestures { offset ->
+                    val index = ((offset.y / stripHeight) * alphabet.size).toInt().coerceIn(0, alphabet.lastIndex)
+                    onLetterSelect(alphabet[index])
+                }
+            }
+            .pointerInput(alphabet) {
+                detectVerticalDragGestures(
+                    onDragStart = { offset ->
+                        val index = ((offset.y / stripHeight) * alphabet.size).toInt().coerceIn(0, alphabet.lastIndex)
+                        onLetterSelect(alphabet[index])
+                    },
+                    onDragEnd = { onDismissBubble() },
+                    onDragCancel = { onDismissBubble() },
+                    onVerticalDrag = { change, _ ->
+                        change.consume()
+                        val index = ((change.position.y / stripHeight) * alphabet.size).toInt().coerceIn(0, alphabet.lastIndex)
+                        onLetterSelect(alphabet[index])
+                    }
+                )
+            },
+        verticalArrangement = Arrangement.SpaceEvenly,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        alphabet.forEach { char ->
+            val isPresent = presentLetters.contains(char)
+            val isSelected = activeLetter == char
+            Text(
+                text = char,
+                fontSize = if (isSelected) 11.sp else 8.5.sp,
+                fontWeight = if (isPresent || isSelected) FontWeight.Black else FontWeight.Normal,
+                color = when {
+                    isSelected -> CyberNeonCyan
+                    isPresent -> Color.White
+                    else -> CyberTextMuted.copy(alpha = 0.4f)
+                }
+            )
+        }
+    }
 }
