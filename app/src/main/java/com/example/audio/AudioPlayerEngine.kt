@@ -24,6 +24,9 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.db.AuraDatabase
 import com.example.data.model.Track
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -216,6 +219,12 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val _selectedPreset = MutableStateFlow(EqPreset.FLAT)
     val selectedPreset: StateFlow<EqPreset> = _selectedPreset.asStateFlow()
 
+    private val _customPresets = MutableStateFlow<List<CustomEqPreset>>(emptyList())
+    val customPresets: StateFlow<List<CustomEqPreset>> = _customPresets.asStateFlow()
+
+    private val _selectedCustomPresetId = MutableStateFlow<String?>(null)
+    val selectedCustomPresetId: StateFlow<String?> = _selectedCustomPresetId.asStateFlow()
+
     private val _playlistQueue = MutableStateFlow<List<Track>>(emptyList())
     val playlistQueue: StateFlow<List<Track>> = _playlistQueue.asStateFlow()
 
@@ -276,6 +285,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     init {
         val savedGapless = prefs.getBoolean("gapless_enabled", false)
         _isGaplessEnabled.value = savedGapless
+        _customPresets.value = loadCustomPresets()
         handler.post(progressUpdater)
         PlaybackControlReceiver.audioPlayerEngine = this
         restoreLastPlaybackState()
@@ -432,6 +442,106 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         if (tracks.isNotEmpty() && startIndex in tracks.indices) {
             currentQueueIndex = startIndex
             playTrack(tracks[startIndex])
+        }
+    }
+
+    fun addToPlayNext(track: Track) {
+        val current = _currentTrack.value
+        if (current == null) {
+            setQueue(listOf(track), 0)
+            return
+        }
+        val queue = _playlistQueue.value.toMutableList()
+        val currIdx = if (currentQueueIndex in queue.indices && queue[currentQueueIndex].id == current.id) {
+            currentQueueIndex
+        } else {
+            val found = queue.indexOfFirst { it.id == current.id }
+            if (found != -1) {
+                found
+            } else {
+                queue.add(0, current)
+                currentQueueIndex = 0
+                0
+            }
+        }
+        val insertIdx = (currIdx + 1).coerceAtMost(queue.size)
+        // If track exists later in queue, remove it so it moves to next
+        val laterIdx = queue.indices.firstOrNull { it > currIdx && queue[it].id == track.id }
+        if (laterIdx != null) {
+            queue.removeAt(laterIdx)
+        }
+        queue.add(insertIdx, track)
+        _playlistQueue.value = queue
+    }
+
+    fun addToQueue(track: Track) {
+        val current = _currentTrack.value
+        if (current == null) {
+            setQueue(listOf(track), 0)
+            return
+        }
+        val queue = _playlistQueue.value.toMutableList()
+        if (queue.none { it.id == current.id }) {
+            queue.add(0, current)
+            currentQueueIndex = 0
+        }
+        queue.add(track)
+        _playlistQueue.value = queue
+    }
+
+    fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        val queue = _playlistQueue.value.toMutableList()
+        if (fromIndex !in queue.indices || toIndex !in queue.indices || fromIndex == toIndex) return
+        val item = queue.removeAt(fromIndex)
+        queue.add(toIndex, item)
+        _playlistQueue.value = queue
+        val current = _currentTrack.value
+        if (current != null) {
+            val newIdx = queue.indexOfFirst { it.id == current.id }
+            if (newIdx != -1) currentQueueIndex = newIdx
+        }
+    }
+
+    fun removeFromQueue(index: Int) {
+        val queue = _playlistQueue.value.toMutableList()
+        if (index !in queue.indices) return
+        val isRemovingCurrent = (index == currentQueueIndex) || (queue[index].id == _currentTrack.value?.id)
+        queue.removeAt(index)
+        _playlistQueue.value = queue
+        if (isRemovingCurrent) {
+            if (queue.isNotEmpty()) {
+                val nextIndex = index.coerceAtMost(queue.size - 1)
+                currentQueueIndex = nextIndex
+                playTrack(queue[nextIndex])
+            } else {
+                currentQueueIndex = -1
+                stopPlayback()
+            }
+        } else {
+            val current = _currentTrack.value
+            if (current != null) {
+                val newIdx = queue.indexOfFirst { it.id == current.id }
+                if (newIdx != -1) currentQueueIndex = newIdx
+            }
+        }
+    }
+
+    fun playQueueTrack(index: Int) {
+        val queue = _playlistQueue.value
+        if (index in queue.indices) {
+            currentQueueIndex = index
+            playTrack(queue[index])
+        }
+    }
+
+    fun clearQueue() {
+        val current = _currentTrack.value
+        if (current != null) {
+            _playlistQueue.value = listOf(current)
+            currentQueueIndex = 0
+        } else {
+            _playlistQueue.value = emptyList()
+            currentQueueIndex = -1
         }
     }
 
@@ -1058,6 +1168,104 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         }
     }
 
+    private fun loadCustomPresets(): List<CustomEqPreset> {
+        val jsonStr = prefs.getString("custom_eq_presets_json", null) ?: return emptyList()
+        return try {
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<CustomEqPreset>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val id = obj.optString("id", UUID.randomUUID().toString())
+                val name = obj.optString("name", "Custom Preset")
+                val gainsArr = obj.optJSONArray("gains")
+                val gains = FloatArray(5)
+                if (gainsArr != null) {
+                    for (j in 0 until minOf(5, gainsArr.length())) {
+                        gains[j] = gainsArr.optDouble(j, 0.0).toFloat()
+                    }
+                }
+                val bassBoost = obj.optDouble("bassBoost", 0.5).toFloat()
+                list.add(CustomEqPreset(id, name, gains, bassBoost))
+            }
+            list
+        } catch (e: Exception) {
+            Log.e("AudioPlayerEngine", "Failed to load custom presets", e)
+            emptyList()
+        }
+    }
+
+    private fun persistCustomPresets(list: List<CustomEqPreset>) {
+        try {
+            val array = JSONArray()
+            for (preset in list) {
+                val obj = JSONObject()
+                obj.put("id", preset.id)
+                obj.put("name", preset.name)
+                val gainsArr = JSONArray()
+                for (gain in preset.gains) {
+                    gainsArr.put(gain.toDouble())
+                }
+                obj.put("gains", gainsArr)
+                obj.put("bassBoost", preset.bassBoost.toDouble())
+                array.put(obj)
+            }
+            prefs.edit().putString("custom_eq_presets_json", array.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("AudioPlayerEngine", "Failed to persist custom presets", e)
+        }
+    }
+
+    fun saveCustomPreset(name: String, gains: FloatArray, bassBoost: Float): CustomEqPreset {
+        val cleanName = name.trim().ifEmpty { "My Preset" }
+        val newPreset = CustomEqPreset(
+            id = UUID.randomUUID().toString(),
+            name = cleanName,
+            gains = gains.copyOf(),
+            bassBoost = bassBoost
+        )
+        val updated = _customPresets.value.toMutableList().apply {
+            val existingIdx = indexOfFirst { it.name.equals(cleanName, ignoreCase = true) }
+            if (existingIdx != -1) {
+                set(existingIdx, newPreset)
+            } else {
+                add(newPreset)
+            }
+        }
+        _customPresets.value = updated
+        persistCustomPresets(updated)
+        selectCustomPreset(newPreset)
+        return newPreset
+    }
+
+    fun deleteCustomPreset(presetId: String) {
+        val updated = _customPresets.value.filter { it.id != presetId }
+        _customPresets.value = updated
+        persistCustomPresets(updated)
+        if (_selectedCustomPresetId.value == presetId) {
+            _selectedCustomPresetId.value = null
+            selectPreset(EqPreset.FLAT)
+        }
+    }
+
+    fun selectCustomPreset(preset: CustomEqPreset, enableEqIfOff: Boolean = true) {
+        _selectedCustomPresetId.value = preset.id
+        _selectedPreset.value = EqPreset.CUSTOM
+        if (enableEqIfOff && !_eqEnabled.value) {
+            setEqEnabled(true)
+        }
+        _bandGains.value = preset.gains.copyOf()
+        _bassBoostLevel.value = preset.bassBoost
+        applyEqualizerGains()
+        if (_eqEnabled.value) {
+            try {
+                if (bassBoostFx?.strengthSupported == true) {
+                    bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
+                }
+            } catch (_: Exception) {}
+        }
+        notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
+    }
+
     fun setBassBoost(level: Float) { // 0.0f to 1.0f
         _bassBoostLevel.value = level
         if (!_eqEnabled.value && level > 0f) {
@@ -1070,6 +1278,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 }
             } catch (_: Exception) {}
         }
+        _selectedCustomPresetId.value = null
         if (_selectedPreset.value != EqPreset.CUSTOM) {
             _selectedPreset.value = EqPreset.CUSTOM
         }
@@ -1085,12 +1294,14 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             setEqEnabled(true)
         }
         applyEqualizerGains()
+        _selectedCustomPresetId.value = null
         if (_selectedPreset.value != EqPreset.CUSTOM) {
             _selectedPreset.value = EqPreset.CUSTOM
         }
     }
 
     fun selectPreset(preset: EqPreset, enableEqIfOff: Boolean = true) {
+        _selectedCustomPresetId.value = null
         _selectedPreset.value = preset
         if (enableEqIfOff && !_eqEnabled.value) {
             setEqEnabled(true)
@@ -1111,6 +1322,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     fun resetEqualizer() {
+        _selectedCustomPresetId.value = null
         selectPreset(EqPreset.FLAT)
     }
 

@@ -98,6 +98,10 @@ fun FullPlayerModal(
     onToggleSlowedReverb: () -> Unit = {},
     onToggleFavorite: (Track) -> Unit,
     onOpenEqualizer: () -> Unit,
+    onPlayQueueTrack: (Int) -> Unit = {},
+    onReorderQueue: (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onRemoveFromQueue: (Int) -> Unit = {},
+    onClearQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!isVisible || currentTrack == null) return
@@ -488,77 +492,20 @@ fun FullPlayerModal(
             }
         }
 
-        // Up Next Queue Modal Sheet
+        // Up Next Queue Modal Sheet with arrange functionality
         if (showQueueSheet) {
-            val sheetState = rememberModalBottomSheetState()
-            ModalBottomSheet(
-                onDismissRequest = { showQueueSheet = false },
-                sheetState = sheetState,
-                containerColor = CyberSurfaceDark
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "PLAYLIST QUEUE",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = CyberNeonCyan,
-                            letterSpacing = 1.sp
-                        ),
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        itemsIndexed(playlistQueue) { idx, track ->
-                            val isThisPlaying = track.id == currentTrack.id
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${idx + 1}",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = if (isThisPlaying) CyberNeonCyan else CyberTextMuted,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.width(32.dp)
-                                )
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = track.title,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            color = if (isThisPlaying) CyberNeonCyan else CyberTextPrimary,
-                                            fontWeight = if (isThisPlaying) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    )
-                                    Text(
-                                        text = track.artist,
-                                        style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary)
-                                    )
-                                }
-
-                                if (track.isFlac) {
-                                    Text(
-                                        text = "FLAC",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = FlacBadgeGreen,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            QueueArrangeBottomSheet(
+                playlistQueue = playlistQueue,
+                currentTrack = currentTrack,
+                isPlaying = isPlaying,
+                onDismiss = { showQueueSheet = false },
+                onPlayTrackAt = { idx ->
+                    onPlayQueueTrack(idx)
+                },
+                onReorderQueue = onReorderQueue,
+                onRemoveFromQueue = onRemoveFromQueue,
+                onClearQueue = onClearQueue
+            )
         }
     }
 }

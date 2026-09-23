@@ -106,6 +106,8 @@ fun LibraryScreen(
     onShuffleAllClick: () -> Unit,
     onDeleteTrack: (Track) -> Unit = {},
     onAddNewTrack: (title: String, artist: String, album: String, isFlac: Boolean) -> Unit = { _, _, _, _ -> },
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -130,15 +132,15 @@ fun LibraryScreen(
         )
 
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
+            modifier = Modifier.fillMaxSize()
         ) {
         Spacer(modifier = Modifier.height(16.dp))
 
         // App Brand Header
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -177,6 +179,7 @@ fun LibraryScreen(
             onValueChange = onSearchQueryChange,
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 16.dp)
                 .testTag("library_search_input"),
             placeholder = { Text("Search songs, artists, albums...", color = CyberTextMuted) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = CyberTextSecondary) },
@@ -206,6 +209,7 @@ fun LibraryScreen(
         // Filter Chips Row
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             item {
@@ -245,6 +249,7 @@ fun LibraryScreen(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(8.dp)),
                 color = CyberSurfaceVariant
             ) {
@@ -260,7 +265,9 @@ fun LibraryScreen(
 
         // Shuffle All & Queue Summary Row
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -364,9 +371,13 @@ fun LibraryScreen(
                 LazyColumn(
                     state = listState,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(end = 28.dp)
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 16.dp,
+                        end = 34.dp,
+                        top = 4.dp,
+                        bottom = 24.dp
+                    ),
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     items(tracks, key = { it.id }) { track ->
                         val isThisPlaying = currentPlayingTrack?.id == track.id && isPlaying
@@ -377,12 +388,10 @@ fun LibraryScreen(
                             onToggleFavorite = { onToggleFavorite(track) },
                             playlists = playlists,
                             onAddToPlaylist = { playlistId -> onAddToPlaylist(playlistId, track.id) },
-                            onDeleteTrack = { onDeleteTrack(track) }
+                            onDeleteTrack = { onDeleteTrack(track) },
+                            onPlayNext = { onPlayNext(track) },
+                            onAddToQueue = { onAddToQueue(track) }
                         )
-                    }
-
-                    item {
-                        Spacer(modifier = Modifier.height(80.dp))
                     }
                 }
 
@@ -426,7 +435,7 @@ fun LibraryScreen(
                     },
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(bottom = 70.dp)
+                        .padding(end = 4.dp, top = 6.dp, bottom = 12.dp)
                 )
 
                 // Large Letter Preview Indicator Bubble
@@ -471,10 +480,10 @@ fun AlphabetFastScroller(
 
     Column(
         modifier = modifier
-            .width(26.dp)
+            .width(24.dp)
             .fillMaxHeight()
             .clip(RoundedCornerShape(12.dp))
-            .background(CyberSurfaceDark.copy(alpha = 0.75f))
+            .background(CyberSurfaceDark.copy(alpha = 0.85f))
             .border(1.dp, CyberSurfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
             .padding(vertical = 4.dp)
             .testTag("alphabet_fast_scroller")
@@ -504,22 +513,29 @@ fun AlphabetFastScroller(
                     }
                 )
             },
-        verticalArrangement = Arrangement.SpaceEvenly,
+        verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         alphabet.forEach { char ->
             val isPresent = presentLetters.contains(char)
             val isSelected = activeLetter == char
-            Text(
-                text = char,
-                fontSize = if (isSelected) 11.sp else 8.5.sp,
-                fontWeight = if (isPresent || isSelected) FontWeight.Black else FontWeight.Normal,
-                color = when {
-                    isSelected -> CyberNeonCyan
-                    isPresent -> Color.White
-                    else -> CyberTextMuted.copy(alpha = 0.4f)
-                }
-            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = char,
+                    fontSize = if (isSelected) 10.5.sp else 8.sp,
+                    fontWeight = if (isPresent || isSelected) FontWeight.Black else FontWeight.Normal,
+                    color = when {
+                        isSelected -> CyberNeonCyan
+                        isPresent -> Color.White
+                        else -> CyberTextMuted.copy(alpha = 0.35f)
+                    }
+                )
+            }
         }
     }
 }

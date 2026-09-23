@@ -232,7 +232,7 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "How to enable Unknown Sources for Android Auto:",
+                    text = "How to enable this app in Android Auto:",
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = CyberTextPrimary
@@ -249,7 +249,7 @@ fun SettingsScreen(
                     "Tap the three-dot menu in the top-right corner of the screen and select Developer settings.",
                     "Scroll down and check the box next to Unknown sources.",
                     "Close developer mode (optional).",
-                    "Restart your phone and reconnect it to your car."
+                    "Reconnect it to your car."
                 )
 
                 autoSteps.forEachIndexed { index, step ->

@@ -32,8 +32,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
@@ -43,21 +46,31 @@ import androidx.compose.material.icons.filled.SpatialAudio
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stadium
 import androidx.compose.material.icons.filled.SurroundSound
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +84,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.audio.CustomEqPreset
 import com.example.audio.EqPreset
 import com.example.audio.SpatialMode
 import com.example.ui.theme.DarkCardBorder
@@ -98,6 +112,8 @@ fun EqualizerScreen(
     playbackSpeed: Float,
     bandGains: FloatArray,
     selectedPreset: EqPreset,
+    customPresets: List<CustomEqPreset> = emptyList(),
+    selectedCustomPresetId: String? = null,
     onEqEnabledToggle: (Boolean) -> Unit,
     onBassBoostChange: (Float) -> Unit,
     onSurround360Toggle: (Boolean) -> Unit,
@@ -107,10 +123,16 @@ fun EqualizerScreen(
     onPlaybackSpeedChange: (Float) -> Unit,
     onBandGainChange: (Int, Float) -> Unit,
     onPresetSelect: (EqPreset) -> Unit,
+    onCustomPresetSelect: (CustomEqPreset) -> Unit = {},
+    onSaveCustomPreset: (String, FloatArray, Float) -> Unit = { _, _, _ -> },
+    onDeleteCustomPreset: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
     val bandLabels = listOf("60Hz\nBass", "230Hz\nLow", "910Hz\nMid", "3.6kHz\nHigh", "14kHz\nTreble")
+    var showSavePresetDialog by remember { mutableStateOf(false) }
+    var presetNameInput by remember { mutableStateOf("") }
+    var presetToDelete by remember { mutableStateOf<CustomEqPreset?>(null) }
 
     Column(
         modifier = modifier
@@ -756,14 +778,33 @@ fun EqualizerScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Equalizer Presets Header
-        Text(
-            text = "PRESETS",
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Bold,
-                color = TextMuted,
-                letterSpacing = 1.sp
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "PRESETS",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = TextMuted,
+                    letterSpacing = 1.sp
+                )
             )
-        )
+
+            TextButton(
+                onClick = {
+                    presetNameInput = ""
+                    showSavePresetDialog = true
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = EqNeonGreen),
+                modifier = Modifier.testTag("save_current_preset_btn")
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Save Current as Preset", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -771,9 +812,53 @@ fun EqualizerScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(EqPreset.entries.toTypedArray()) { preset ->
+            // User-Saved Custom Presets
+            items(customPresets, key = { it.id }) { customPreset ->
+                val isSelected = selectedCustomPresetId == customPreset.id && eqEnabled
                 FilterChip(
-                    selected = selectedPreset == preset && eqEnabled,
+                    selected = isSelected,
+                    onClick = { onCustomPresetSelect(customPreset) },
+                    enabled = true,
+                    label = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(customPreset.name, fontWeight = FontWeight.SemiBold)
+                            IconButton(
+                                onClick = { presetToDelete = customPreset },
+                                modifier = Modifier.size(18.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Delete preset",
+                                    tint = if (isSelected) Color.Black else TextMuted,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = EqNeonGreen,
+                        selectedLabelColor = Color.Black,
+                        containerColor = DarkSurfaceVariant,
+                        labelColor = Color.White
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected,
+                        borderColor = if (isSelected) EqNeonGreen else DarkCardBorder,
+                        selectedBorderColor = EqNeonGreen
+                    ),
+                    modifier = Modifier.testTag("custom_preset_${customPreset.id}")
+                )
+            }
+
+            // Built-in Presets
+            items(EqPreset.entries.toTypedArray()) { preset ->
+                val isSelected = selectedCustomPresetId == null && selectedPreset == preset && eqEnabled
+                FilterChip(
+                    selected = isSelected,
                     onClick = { onPresetSelect(preset) },
                     enabled = true,
                     label = { Text(preset.displayName, fontWeight = FontWeight.Medium) },
@@ -785,7 +870,7 @@ fun EqualizerScreen(
                     ),
                     border = FilterChipDefaults.filterChipBorder(
                         enabled = true,
-                        selected = selectedPreset == preset && eqEnabled,
+                        selected = isSelected,
                         borderColor = DarkCardBorder,
                         selectedBorderColor = EqNeonGreen
                     ),
@@ -887,6 +972,158 @@ fun EqualizerScreen(
                     }
                 }
             }
+        }
+
+        // Save Custom Preset Dialog
+        if (showSavePresetDialog) {
+            AlertDialog(
+                onDismissRequest = { showSavePresetDialog = false },
+                title = {
+                    Text(
+                        text = "Save Custom Preset",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "Save current 5-band frequency sliders and bass boost level as a reusable preset:",
+                            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = presetNameInput,
+                            onValueChange = { presetNameInput = it },
+                            label = { Text("Preset Name", color = TextSecondary) },
+                            placeholder = { Text("e.g. Deep Bass / Car Stereo", color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = EqNeonGreen,
+                                unfocusedBorderColor = DarkCardBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                cursorColor = EqNeonGreen
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("custom_preset_name_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp)),
+                            color = DarkSurfaceVariant
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = "Current Settings Preview:",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = EqNeonGreen,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                val bandSummary = (0..4).joinToString(" • ") { idx ->
+                                    val gain = bandGains.getOrElse(idx) { 0f }.toInt()
+                                    val sign = if (gain > 0) "+" else ""
+                                    val lbl = when (idx) {
+                                        0 -> "60Hz"
+                                        1 -> "230Hz"
+                                        2 -> "910Hz"
+                                        3 -> "3.6k"
+                                        else -> "14k"
+                                    }
+                                    "$lbl: $sign${gain}dB"
+                                }
+                                Text(
+                                    text = bandSummary,
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
+                                    fontSize = 10.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Bass Boost: ${(bassBoostLevel * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextMuted),
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val name = presetNameInput.trim().ifEmpty { "My Preset" }
+                            onSaveCustomPreset(name, bandGains, bassBoostLevel)
+                            showSavePresetDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EqNeonGreen,
+                            contentColor = Color.Black
+                        ),
+                        modifier = Modifier.testTag("confirm_save_preset_btn")
+                    ) {
+                        Text("Save", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSavePresetDialog = false }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                },
+                containerColor = DarkSurface,
+                shape = RoundedCornerShape(16.dp)
+            )
+        }
+
+        // Delete Preset Confirmation Dialog
+        presetToDelete?.let { preset ->
+            AlertDialog(
+                onDismissRequest = { presetToDelete = null },
+                title = {
+                    Text(
+                        text = "Delete Preset",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to delete '${preset.name}'?",
+                        style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary)
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            onDeleteCustomPreset(preset.id)
+                            presetToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DarkRedPrimary,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Delete", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { presetToDelete = null }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                },
+                containerColor = DarkSurface,
+                shape = RoundedCornerShape(16.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(100.dp))

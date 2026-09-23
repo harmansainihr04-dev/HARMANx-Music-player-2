@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.AudioPlayerEngine
+import com.example.audio.CustomEqPreset
 import com.example.audio.EqPreset
 import com.example.audio.ReverbEffect
 import com.example.audio.RepeatMode
@@ -76,6 +77,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playbackSpeed = playerEngine.playbackSpeed
     val bandGains = playerEngine.bandGains
     val selectedPreset = playerEngine.selectedPreset
+    val customPresets = playerEngine.customPresets
+    val selectedCustomPresetId = playerEngine.selectedCustomPresetId
     val playlistQueue = playerEngine.playlistQueue
 
     private val _isScanInProgress = MutableStateFlow(false)
@@ -92,6 +95,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playTrackList(tracks: List<Track>, startIndex: Int = 0) {
         playerEngine.setQueue(tracks, startIndex)
+    }
+
+    fun addToPlayNext(track: Track) {
+        playerEngine.addToPlayNext(track)
+    }
+
+    fun addToQueue(track: Track) {
+        playerEngine.addToQueue(track)
+    }
+
+    fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        playerEngine.reorderQueue(fromIndex, toIndex)
+    }
+
+    fun removeFromQueue(index: Int) {
+        playerEngine.removeFromQueue(index)
+    }
+
+    fun playQueueTrack(index: Int) {
+        playerEngine.playQueueTrack(index)
+    }
+
+    fun clearQueue() {
+        playerEngine.clearQueue()
     }
 
     fun playSingleTrack(track: Track) {
@@ -190,6 +217,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun cycleBassBoost() = playerEngine.cycleBassBoost()
     fun setBandGain(bandIndex: Int, gainDb: Float) = playerEngine.setBandGain(bandIndex, gainDb)
     fun selectPreset(preset: EqPreset) = playerEngine.selectPreset(preset)
+    fun selectCustomPreset(preset: CustomEqPreset) = playerEngine.selectCustomPreset(preset)
+    fun saveCustomPreset(name: String, gains: FloatArray, bassBoost: Float) = playerEngine.saveCustomPreset(name, gains, bassBoost)
+    fun deleteCustomPreset(presetId: String) = playerEngine.deleteCustomPreset(presetId)
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query

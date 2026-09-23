@@ -87,6 +87,8 @@ fun PlaylistsScreen(
     onTrackClick: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onRemoveTrackFromPlaylist: (Long, Long) -> Unit,
+    onPlayNext: (Track) -> Unit = {},
+    onAddToQueue: (Track) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -432,7 +434,9 @@ fun PlaylistsScreen(
                                                     onTrackClick(track)
                                                 }
                                             },
-                                            onToggleFavorite = { onToggleFavorite(track) }
+                                            onToggleFavorite = { onToggleFavorite(track) },
+                                            onPlayNext = { onPlayNext(track) },
+                                            onAddToQueue = { onAddToQueue(track) }
                                         )
                                     }
 

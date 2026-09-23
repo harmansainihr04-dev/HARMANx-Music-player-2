@@ -19,6 +19,8 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -61,6 +63,8 @@ fun TrackItemCard(
     playlists: List<Playlist> = emptyList(),
     onAddToPlaylist: (Long) -> Unit = {},
     onDeleteTrack: () -> Unit = {},
+    onPlayNext: () -> Unit = {},
+    onAddToQueue: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -169,6 +173,28 @@ fun TrackItemCard(
                     onDismissRequest = { showMenu = false },
                     modifier = Modifier.background(CyberSurfaceDark)
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("Play Next", color = CyberTextPrimary, fontWeight = FontWeight.SemiBold) },
+                        leadingIcon = {
+                            Icon(Icons.Default.PlaylistPlay, contentDescription = "Play Next", tint = CyberNeonCyan)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onPlayNext()
+                        },
+                        modifier = Modifier.testTag("play_next_track_${track.id}")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to Queue", color = CyberTextPrimary) },
+                        leadingIcon = {
+                            Icon(Icons.Default.QueueMusic, contentDescription = "Add to Queue", tint = CyberNeonCyan)
+                        },
+                        onClick = {
+                            showMenu = false
+                            onAddToQueue()
+                        },
+                        modifier = Modifier.testTag("add_to_queue_track_${track.id}")
+                    )
                     DropdownMenuItem(
                         text = { Text("Add to Playlist", color = CyberTextPrimary) },
                         leadingIcon = {

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -165,6 +167,7 @@ fun AuraMusicApp(
 ) {
     var selectedTab by remember { mutableStateOf(NavTab.LIBRARY) }
     var isFullPlayerVisible by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val tracks by viewModel.displayedTracks.collectAsStateWithLifecycle()
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
@@ -185,6 +188,8 @@ fun AuraMusicApp(
     val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
     val bandGains by viewModel.bandGains.collectAsStateWithLifecycle()
     val selectedPreset by viewModel.selectedPreset.collectAsStateWithLifecycle()
+    val customPresets by viewModel.customPresets.collectAsStateWithLifecycle()
+    val selectedCustomPresetId by viewModel.selectedCustomPresetId.collectAsStateWithLifecycle()
     val playlistQueue by viewModel.playlistQueue.collectAsStateWithLifecycle()
 
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -341,6 +346,14 @@ fun AuraMusicApp(
                     onDeleteTrack = { track -> viewModel.deleteTrack(track) },
                     onAddNewTrack = { title, artist, album, isFlac ->
                         viewModel.addNewTrack(title, artist, album, isFlac)
+                    },
+                    onPlayNext = { track ->
+                        viewModel.addToPlayNext(track)
+                        Toast.makeText(context, "${track.title} will play next", Toast.LENGTH_SHORT).show()
+                    },
+                    onAddToQueue = { track ->
+                        viewModel.addToQueue(track)
+                        Toast.makeText(context, "Added to queue: ${track.title}", Toast.LENGTH_SHORT).show()
                     }
                 )
 
@@ -354,7 +367,15 @@ fun AuraMusicApp(
                     onPlayPlaylistTracks = { playlistTracks, startIndex -> viewModel.playTrackList(playlistTracks, startIndex) },
                     onTrackClick = { track -> viewModel.playSingleTrack(track) },
                     onToggleFavorite = { track -> viewModel.toggleFavorite(track) },
-                    onRemoveTrackFromPlaylist = { playlistId, trackId -> viewModel.removeTrackFromPlaylist(playlistId, trackId) }
+                    onRemoveTrackFromPlaylist = { playlistId, trackId -> viewModel.removeTrackFromPlaylist(playlistId, trackId) },
+                    onPlayNext = { track ->
+                        viewModel.addToPlayNext(track)
+                        Toast.makeText(context, "${track.title} will play next", Toast.LENGTH_SHORT).show()
+                    },
+                    onAddToQueue = { track ->
+                        viewModel.addToQueue(track)
+                        Toast.makeText(context, "Added to queue: ${track.title}", Toast.LENGTH_SHORT).show()
+                    }
                 )
 
                 NavTab.EQUALIZER -> EqualizerScreen(
@@ -367,6 +388,8 @@ fun AuraMusicApp(
                     playbackSpeed = playbackSpeed,
                     bandGains = bandGains,
                     selectedPreset = selectedPreset,
+                    customPresets = customPresets,
+                    selectedCustomPresetId = selectedCustomPresetId,
                     onEqEnabledToggle = { viewModel.setEqEnabled(it) },
                     onBassBoostChange = { viewModel.setBassBoost(it) },
                     onSurround360Toggle = { viewModel.setSurround360Enabled(it) },
@@ -375,7 +398,10 @@ fun AuraMusicApp(
                     onSlowedReverbToggle = { viewModel.setSlowedReverbEnabled(it) },
                     onPlaybackSpeedChange = { viewModel.setPlaybackSpeed(it) },
                     onBandGainChange = { index, gain -> viewModel.setBandGain(index, gain) },
-                    onPresetSelect = { preset -> viewModel.selectPreset(preset) }
+                    onPresetSelect = { preset -> viewModel.selectPreset(preset) },
+                    onCustomPresetSelect = { customPreset -> viewModel.selectCustomPreset(customPreset) },
+                    onSaveCustomPreset = { name, gains, bb -> viewModel.saveCustomPreset(name, gains, bb) },
+                    onDeleteCustomPreset = { presetId -> viewModel.deleteCustomPreset(presetId) }
                 )
 
                 NavTab.SETTINGS -> SettingsScreen(
@@ -411,7 +437,11 @@ fun AuraMusicApp(
                 onOpenEqualizer = {
                     selectedTab = NavTab.EQUALIZER
                     isFullPlayerVisible = false
-                }
+                },
+                onPlayQueueTrack = { idx -> viewModel.playQueueTrack(idx) },
+                onReorderQueue = { fromIdx, toIdx -> viewModel.reorderQueue(fromIdx, toIdx) },
+                onRemoveFromQueue = { idx -> viewModel.removeFromQueue(idx) },
+                onClearQueue = { viewModel.clearQueue() }
             )
         }
     }
