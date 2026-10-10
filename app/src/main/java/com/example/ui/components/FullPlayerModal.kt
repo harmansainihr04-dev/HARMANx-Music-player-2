@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,8 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
@@ -114,12 +117,17 @@ fun FullPlayerModal(
             .testTag("full_player_modal"),
         color = CyberDeepBackground
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val maxH = maxHeight
+            // Stretches album artwork to 350.dp on standard/tall phones down to where format text was, scaling safely on smaller screens
+            val artworkHeight = if (maxH >= 680.dp) 350.dp else (maxH * 0.44f).coerceIn(260.dp, 350.dp)
+            val visualizerHeight = (artworkHeight - 120.dp).coerceAtLeast(160.dp)
+
             // YouTube Music Style Ambient Top Bloom
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(350.dp)
+                    .height(artworkHeight + 90.dp)
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -134,7 +142,8 @@ fun FullPlayerModal(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
             // Header
@@ -185,13 +194,13 @@ fun FullPlayerModal(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Artwork Container with Live Audio Visualizer Overlay
+            // Artwork Container with Live Audio Visualizer Overlay (Stretched taller down to format line)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(260.dp)
+                    .height(artworkHeight)
                     .clip(RoundedCornerShape(24.dp))
                     .background(
                         Brush.verticalGradient(
@@ -204,7 +213,7 @@ fun FullPlayerModal(
                 TrackArtworkThumbnail(
                     track = currentTrack,
                     modifier = Modifier.fillMaxSize(),
-                    iconSize = 72.dp,
+                    iconSize = 84.dp,
                     shape = RoundedCornerShape(24.dp)
                 )
 
@@ -235,7 +244,7 @@ fun FullPlayerModal(
                         bassBoostLevel = bassBoostLevel,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(170.dp)
+                            .height(visualizerHeight)
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -251,7 +260,7 @@ fun FullPlayerModal(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Track Meta Info
             Column(
@@ -490,6 +499,8 @@ fun FullPlayerModal(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(18.dp))
         }
 
         // Up Next Queue Modal Sheet with arrange functionality

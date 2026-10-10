@@ -40,9 +40,7 @@ fun VisualizerCanvas(
     )
 
     Canvas(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(140.dp)
+        modifier = modifier.fillMaxWidth()
     ) {
         val barCount = 32
         val totalWidth = size.width

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -75,7 +74,7 @@ fun SettingsScreen(
         // Screen Header
         Column {
             Text(
-                text = "AUDIO & ENGINE SETTINGS",
+                text = "AUDIO SETTINGS",
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.Black,
                     color = CyberNeonCyan,
@@ -83,7 +82,7 @@ fun SettingsScreen(
                 )
             )
             Text(
-                text = "Gapless Playback & Hardware Configuration",
+                text = "Gapless Playback & Device Configuration",
                 style = MaterialTheme.typography.labelSmall.copy(color = CyberTextSecondary)
             )
         }
@@ -147,48 +146,7 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
 
-        // Audio Engine Technical Specifications Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp)),
-            colors = CardDefaults.cardColors(containerColor = CyberSurfaceDark)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Memory,
-                        contentDescription = null,
-                        tint = CyberNeonCyan,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "AUDIO ENGINE SPECIFICATIONS",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = CyberNeonCyan,
-                            letterSpacing = 1.sp
-                        )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                SpecRow("Decoder Engine", "Native Audio / Low Latency PCM")
-                SpecRow("Spatial Audio Effects", "360° Surround Sound & Reverb")
-                SpecRow("Supported Audio Formats", ".MP3, .FLAC, .WAV, .M4A, .AAC, .OGG")
-                SpecRow("Equalizer Engine", "5-Band Hardware / DSP Parametric FX")
-                SpecRow("Audio Session Buffer", "Low Latency Dual-Buffer")
-                SpecRow("Android Auto Integration", "MediaBrowserService (Active)")
-            }
-        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -441,15 +399,3 @@ fun SettingsScreen(
     }
 }
 
-@Composable
-fun SpecRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = label, style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary))
-        Text(text = value, style = MaterialTheme.typography.bodySmall.copy(color = CyberTextPrimary, fontWeight = FontWeight.Bold))
-    }
-}

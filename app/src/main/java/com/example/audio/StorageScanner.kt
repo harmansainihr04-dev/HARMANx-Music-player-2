@@ -31,8 +31,8 @@ class StorageScanner(private val context: Context) {
             MediaStore.Audio.Media.DATA
         )
 
-        // Filter: music tracks or explicit audio files (WAV, FLAC, MP3, M4A, AAC, OGG) with duration >= 30 seconds
-        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.DATA} LIKE '%.wav' OR ${MediaStore.Audio.Media.DATA} LIKE '%.flac' OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE '%wav%') AND (${MediaStore.Audio.Media.DURATION} >= 30000)"
+        // Filter: music tracks or explicit audio files (WAV, FLAC, MP3, M4A, AAC, OGG) with duration >= 5 seconds
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.DATA} LIKE '%.wav' OR ${MediaStore.Audio.Media.DATA} LIKE '%.flac' OR ${MediaStore.Audio.Media.DATA} LIKE '%.m4a' OR ${MediaStore.Audio.Media.DATA} LIKE '%.ogg' OR ${MediaStore.Audio.Media.DATA} LIKE '%.aac' OR ${MediaStore.Audio.Media.DATA} LIKE '%.mp3' OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE '%audio%' OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE '%flac%' OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE '%wav%' OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE '%ogg%') AND (${MediaStore.Audio.Media.DURATION} >= 5000)"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         try {

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.components.AnimatedSplashScreen
 import com.example.ui.components.FullPlayerModal
 import com.example.ui.components.MiniPlayer
 import com.example.ui.screens.EqualizerScreen
@@ -167,6 +168,7 @@ fun AuraMusicApp(
 ) {
     var selectedTab by remember { mutableStateOf(NavTab.LIBRARY) }
     var isFullPlayerVisible by remember { mutableStateOf(false) }
+    var isSplashVisible by remember { mutableStateOf(true) }
     val context = LocalContext.current
 
     val tracks by viewModel.displayedTracks.collectAsStateWithLifecycle()
@@ -210,9 +212,10 @@ fun AuraMusicApp(
         viewModel.setSearchQuery("")
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = CyberDeepBackground,
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = CyberDeepBackground,
         bottomBar = {
             Column(
                 modifier = Modifier
@@ -445,4 +448,11 @@ fun AuraMusicApp(
             )
         }
     }
+
+    if (isSplashVisible) {
+        AnimatedSplashScreen(
+            onSplashFinished = { isSplashVisible = false }
+        )
+    }
+}
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/cyber_deep_background</item>
+        <item name="android:statusBarColor">@color/cyber_deep_background</item>
+        <item name="android:navigationBarColor">@color/cyber_deep_background</item>
+        
+        <!-- Android 12+ (API 31+) System Splash Screen Customization -->
+        <!-- Suppresses the default static round launcher icon so our custom animated neon intro runs smoothly without duplicate static logo appearing first -->
+        <item name="android:windowSplashScreenBackground">@color/cyber_deep_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/cyber_deep_background</item>
+    </style>
+</resources>
