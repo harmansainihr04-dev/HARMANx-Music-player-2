@@ -127,7 +127,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private var synthAudioTrack: AudioTrack? = null
     private var isSynthPlaying = false
     private var synthThread: Thread? = null
-    private var codecPlayer: MediaCodecAudioPlayer? = null
 
     // WakeLock to prevent CPU from going into deep sleep during background audio playback
     private var wakeLock: PowerManager.WakeLock? = null
@@ -261,25 +260,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                     }
                 }
             } ?: run {
-                codecPlayer?.let { cp ->
-                    if (cp.isCurrentlyPlaying()) {
-                        val curPos = cp.getCurrentPositionMs()
-                        _currentPositionMs.value = curPos
-                        if (Math.abs(curPos - lastSavedPosition) >= 2000) {
-                            lastSavedPosition = curPos
-                            savePlaybackState(curPos)
-                        }
-                        val dur = _durationMs.value
-                        if (_isGaplessEnabled.value && dur > 3000L) {
-                            val bounds = currentTrimBounds
-                            val outroCutPoint = bounds?.outroEndMs ?: (dur - 1200L)
-                            if (curPos >= outroCutPoint && curPos < dur) {
-                                Log.d("AudioPlayerEngine", "Gapless active (codec): Voice note finished at ${curPos}ms. Playing next.")
-                                playNext()
-                            }
-                        }
-                    }
-                }
                 if (isSynthPlaying) {
                     val newPos = (_currentPositionMs.value + 200).coerceAtMost(_durationMs.value)
                     _currentPositionMs.value = newPos
@@ -303,14 +283,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     init {
-        codecPlayer = MediaCodecAudioPlayer(context).apply {
-            onPositionUpdate = { pos ->
-                _currentPositionMs.value = pos
-            }
-            onCompletion = {
-                handler.post { onTrackCompleted() }
-            }
-        }
         val savedGapless = prefs.getBoolean("gapless_enabled", false)
         _isGaplessEnabled.value = savedGapless
         _customPresets.value = loadCustomPresets()
@@ -624,8 +596,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             return
         }
 
-        // 2. Try standard Android MediaPlayer with robust content/file descriptor resolution
-        var mediaPlayerSuccess = false
+        // 2. Standard Android MediaPlayer with robust content/file descriptor resolution
         try {
             val player = MediaPlayer().apply {
                 setAudioAttributes(
@@ -650,35 +621,15 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             applyPlaybackSpeed()
             player.setOnCompletionListener { onTrackCompleted() }
             notifyPlaybackState()
-            mediaPlayerSuccess = true
             Log.d("AudioPlayerEngine", "Playing via MediaPlayer: ${track.title} (${track.audioPath})")
+            return
         } catch (e: Exception) {
-            Log.w("AudioPlayerEngine", "MediaPlayer could not prepare ${track.title} (${e.message}). Falling back to MediaCodec Universal Decoder for FLAC/WAV/Hi-Res.")
+            Log.w("AudioPlayerEngine", "MediaPlayer could not prepare ${track.title} (${e.message})")
             try { primaryPlayer?.release() } catch (_: Exception) {}
             primaryPlayer = null
         }
 
-        if (mediaPlayerSuccess) return
-
-        // 3. Hardware/Software MediaCodec Universal Decoder (Lossless FLAC 24-bit, WAV PCM, M4A, OGG, Opus)
-        try {
-            val started = codecPlayer?.start(track.audioPath, actualStartMs) ?: false
-            if (started) {
-                acquireWakeLock()
-                _isPlaying.value = true
-                val sessId = codecPlayer?.getAudioSessionId() ?: 0
-                if (sessId != 0) {
-                    setupAudioFx(sessId)
-                }
-                notifyPlaybackState()
-                Log.d("AudioPlayerEngine", "Playing via MediaCodec Universal Decoder: ${track.title}")
-                return
-            }
-        } catch (e: Exception) {
-            Log.e("AudioPlayerEngine", "MediaCodec Universal Decoder failed for ${track.title}", e)
-        }
-
-        // 4. File completely unreadable (corrupt or missing) - Do NOT play synthetic beep sound!
+        // File completely unreadable (corrupt or missing)
         Log.e("AudioPlayerEngine", "Audio track could not be decoded: ${track.title} (${track.audioPath})")
         _isPlaying.value = false
         releaseWakeLock()
@@ -1083,11 +1034,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 player.pause()
             }
         }
-        codecPlayer?.let { cp ->
-            if (cp.isCurrentlyPlaying()) {
-                cp.pause()
-            }
-        }
         if (isSynthPlaying) {
             isSynthPlaying = false
         }
@@ -1118,21 +1064,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 notifyPlaybackState()
             }
             return
-        }
-
-        codecPlayer?.let { cp ->
-            if (cp.isCurrentlyPlaying()) {
-                pausePlayback()
-                return
-            } else if (!cp.isCurrentlyPlaying() && _currentPositionMs.value > 0) {
-                requestAudioFocus()
-                registerBecomingNoisyReceiver()
-                acquireWakeLock()
-                cp.resume()
-                _isPlaying.value = true
-                notifyPlaybackState()
-                return
-            }
         }
 
         if (isSynthPlaying) {
@@ -1191,7 +1122,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     fun seekTo(positionMs: Long) {
         _currentPositionMs.value = positionMs
         primaryPlayer?.seekTo(positionMs.toInt())
-        codecPlayer?.seekTo(positionMs)
         savePlaybackState(positionMs)
         notifyPlaybackState()
     }
@@ -1497,7 +1427,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         abandonAudioFocus()
 
         silenceAnalysisJob?.cancel()
-        codecPlayer?.stop()
         isSynthPlaying = false
         synthAudioTrack?.let {
             try {
@@ -1647,8 +1576,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun release() {
         stopPlayback()
-        codecPlayer?.release()
-        codecPlayer = null
         handler.removeCallbacks(progressUpdater)
         try {
             equalizerFx?.release()
