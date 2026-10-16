@@ -104,6 +104,9 @@ import kotlin.math.sin
 @Composable
 fun EqualizerScreen(
     eqEnabled: Boolean,
+    isExternalAudioConnected: Boolean = true,
+    isAuxSimulated: Boolean = false,
+    onToggleSimulateAux: () -> Unit = {},
     bassBoostLevel: Float,
     surround360Enabled: Boolean,
     spatialMode: SpatialMode = SpatialMode.HEADPHONES_3D,
@@ -128,11 +131,20 @@ fun EqualizerScreen(
     onDeleteCustomPreset: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
     val bandLabels = listOf("60Hz\nBass", "230Hz\nLow", "910Hz\nMid", "3.6kHz\nHigh", "14kHz\nTreble")
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
     var presetToDelete by remember { mutableStateOf<CustomEqPreset?>(null) }
+
+    val showSpeakerWarningToast = {
+        android.widget.Toast.makeText(
+            context,
+            "Equalizer is disabled on normal phone speakers. Connect Bluetooth or Wired Aux/Headphones to enable.",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
 
     Column(
         modifier = modifier
@@ -163,31 +175,45 @@ fun EqualizerScreen(
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = if (!isExternalAudioConnected) Modifier.clickable { showSpeakerWarningToast() } else Modifier
+            ) {
                 Text(
                     text = if (eqEnabled) "ON" else "OFF",
                     style = MaterialTheme.typography.labelMedium.copy(
-                        color = if (eqEnabled) EqNeonGreen else TextMuted,
+                        color = if (!isExternalAudioConnected) Color(0xFFFFB74D) else if (eqEnabled) EqNeonGreen else TextMuted,
                         fontWeight = FontWeight.Bold
                     ),
                     modifier = Modifier.padding(end = 8.dp)
                 )
                 Switch(
-                    checked = eqEnabled,
-                    onCheckedChange = onEqEnabledToggle,
+                    checked = eqEnabled && isExternalAudioConnected,
+                    enabled = isExternalAudioConnected,
+                    onCheckedChange = {
+                        if (!isExternalAudioConnected) {
+                            showSpeakerWarningToast()
+                        } else {
+                            onEqEnabledToggle(it)
+                        }
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = EqNeonGreen,
                         checkedTrackColor = EqNeonGreen.copy(alpha = 0.35f),
                         uncheckedThumbColor = TextMuted,
-                        uncheckedTrackColor = DarkSurfaceVariant
+                        uncheckedTrackColor = DarkSurfaceVariant,
+                        disabledCheckedThumbColor = TextMuted.copy(alpha = 0.4f),
+                        disabledCheckedTrackColor = DarkSurfaceVariant.copy(alpha = 0.2f),
+                        disabledUncheckedThumbColor = TextMuted.copy(alpha = 0.4f),
+                        disabledUncheckedTrackColor = DarkSurfaceVariant.copy(alpha = 0.2f)
                     ),
                     modifier = Modifier.testTag("eq_master_switch")
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
+        Spacer(modifier = Modifier.height(12.dp))
+        
         // Slowed + Reverb (Lofi Aesthetic Sound FX) Card
         Card(
             modifier = Modifier
@@ -341,364 +367,7 @@ fun EqualizerScreen(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-
-        // 360° High-Fidelity Spatial Surround Sound Engine Card
-        val infiniteTransition = rememberInfiniteTransition(label = "spatial_orbit")
-        val orbitPhase by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 6000, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "orbit_angle"
-        )
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .border(
-                    1.dp,
-                    if (surround360Enabled) EqNeonGreen.copy(alpha = 0.5f) else DarkCardBorder,
-                    RoundedCornerShape(16.dp)
-                ),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (surround360Enabled) {
-                                        Brush.linearGradient(listOf(EqNeonGreen.copy(alpha = 0.35f), EqNeonGreenAccent.copy(alpha = 0.2f)))
-                                    } else {
-                                        Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurfaceVariant))
-                                    }
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SpatialAudio,
-                                contentDescription = "360 Spatial Audio",
-                                tint = if (surround360Enabled) EqNeonGreenAccent else TextMuted,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "360° Spatial Audio",
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(if (surround360Enabled) EqNeonGreen.copy(alpha = 0.25f) else DarkSurfaceVariant)
-                                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                                ) {
-                                    Text(
-                                        text = "3D SPHERE",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = if (surround360Enabled) EqNeonGreenAccent else TextMuted,
-                                            fontSize = 8.sp,
-                                            fontWeight = FontWeight.Black
-                                        )
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Dolby Atmos / HRTF binaural soundstage & vocal lock",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = surround360Enabled,
-                        onCheckedChange = onSurround360Toggle,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = EqNeonGreen,
-                            checkedTrackColor = EqNeonGreen.copy(alpha = 0.35f),
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = DarkSurfaceVariant
-                        ),
-                        modifier = Modifier.testTag("surround_360_switch")
-                    )
-                }
-
-                AnimatedVisibility(visible = surround360Enabled) {
-                    Column(modifier = Modifier.padding(top = 14.dp)) {
-                        // Live 3D Spatial Spherical Orbit Visualizer
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(95.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF0D0B10))
-                                .border(1.dp, EqNeonGreen.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
-                                val centerX = size.width / 2f
-                                val centerY = size.height / 2f
-                                val maxRadius = (size.height / 2f) - 6f
-                                val currentOrbitDeg = if (surround360Enabled) orbitPhase else 0f
-
-                                // Outer 360 Acoustic boundary rings
-                                drawCircle(
-                                    color = Color.White.copy(alpha = 0.06f),
-                                    radius = maxRadius,
-                                    center = Offset(centerX, centerY),
-                                    style = Stroke(width = 1.5f)
-                                )
-                                drawCircle(
-                                    color = EqNeonGreen.copy(alpha = 0.2f),
-                                    radius = maxRadius * 0.7f,
-                                    center = Offset(centerX, centerY),
-                                    style = Stroke(width = 1.5f)
-                                )
-
-                                // Center Listener / Vocal Lock Node
-                                drawCircle(
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(EqNeonGreen, EqNeonGreen.copy(alpha = 0.4f), Color.Transparent),
-                                        center = Offset(centerX, centerY),
-                                        radius = 24f
-                                    ),
-                                    radius = 14f,
-                                    center = Offset(centerX, centerY)
-                                )
-                                drawCircle(
-                                    color = Color.White,
-                                    radius = 4.5f,
-                                    center = Offset(centerX, centerY)
-                                )
-
-                                // Left & Right Orbiting 3D Sound Spheres
-                                val radLeft = Math.toRadians((currentOrbitDeg).toDouble())
-                                val radRight = Math.toRadians((currentOrbitDeg + 180.0))
-
-                                val orbitRadiusX = maxRadius * 1.8f.coerceAtMost(size.width * 0.38f)
-                                val orbitRadiusY = maxRadius * 0.85f
-
-                                val leftX = (centerX + orbitRadiusX * cos(radLeft)).toFloat()
-                                val leftY = (centerY + orbitRadiusY * sin(radLeft)).toFloat()
-
-                                val rightX = (centerX + orbitRadiusX * cos(radRight)).toFloat()
-                                val rightY = (centerY + orbitRadiusY * sin(radRight)).toFloat()
-
-                                // Spatial orbit trace line
-                                drawLine(
-                                    color = EqNeonGreen.copy(alpha = 0.35f),
-                                    start = Offset(leftX, leftY),
-                                    end = Offset(rightX, rightY),
-                                    strokeWidth = 1.5f
-                                )
-
-                                // Left satellite speaker node
-                                drawCircle(
-                                    color = EqNeonGreenAccent,
-                                    radius = 6f,
-                                    center = Offset(leftX, leftY)
-                                )
-                                drawCircle(
-                                    color = Color.White,
-                                    radius = 2.5f,
-                                    center = Offset(leftX, leftY)
-                                )
-
-                                // Right satellite speaker node
-                                drawCircle(
-                                    color = SpatialBlue,
-                                    radius = 6f,
-                                    center = Offset(rightX, rightY)
-                                )
-                                drawCircle(
-                                    color = Color.White,
-                                    radius = 2.5f,
-                                    center = Offset(rightX, rightY)
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "360° LEFT",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = EqNeonGreenAccent.copy(alpha = 0.9f),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                                Text(
-                                    text = "CENTER VOCAL LOCK",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = TextPrimary.copy(alpha = 0.85f),
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                                Text(
-                                    text = "360° RIGHT",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = SpatialBlue.copy(alpha = 0.8f),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Spatial Modes Selector (Headphones, Arena, Car)
-                        Text(
-                            text = "Spatial Sound Profile",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = TextSecondary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            SpatialMode.values().forEach { mode ->
-                                val isSelected = spatialMode == mode
-                                val icon = when (mode) {
-                                    SpatialMode.HEADPHONES_3D -> Icons.Default.Headphones
-                                    SpatialMode.ARENA_360 -> Icons.Default.Stadium
-                                    SpatialMode.CAR_CABIN_360 -> Icons.Default.DirectionsCar
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(if (isSelected) EqNeonGreen.copy(alpha = 0.18f) else DarkSurfaceVariant)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) EqNeonGreen else Color.Transparent,
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { onSpatialModeSelect(mode) }
-                                        .padding(vertical = 10.dp, horizontal = 6.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = mode.title,
-                                            tint = if (isSelected) EqNeonGreenAccent else TextMuted,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = when (mode) {
-                                                SpatialMode.HEADPHONES_3D -> "Headphones"
-                                                SpatialMode.ARENA_360 -> "Arena 360"
-                                                SpatialMode.CAR_CABIN_360 -> "Car Cabin"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                color = if (isSelected) TextPrimary else TextSecondary,
-                                                fontSize = 10.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                            ),
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Active Profile Description Box
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceVariant.copy(alpha = 0.5f))
-                                .padding(horizontal = 10.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                text = "⚡ ${spatialMode.description}",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = TextSecondary,
-                                    fontSize = 10.sp
-                                )
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Surround Depth Slider
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Surround Soundstage Depth",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
-                            )
-                            Text(
-                                text = "${(surroundStrength * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    color = EqNeonGreenAccent,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
-                        }
-                        Slider(
-                            value = surroundStrength,
-                            onValueChange = onSurroundStrengthChange,
-                            enabled = surround360Enabled,
-                            colors = SliderDefaults.colors(
-                                thumbColor = EqNeonGreen,
-                                activeTrackColor = EqNeonGreen,
-                                inactiveTrackColor = DarkSurfaceVariant
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("surround_strength_slider")
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
+        
         // Bass Boost Card
         Card(
             modifier = Modifier
@@ -728,7 +397,7 @@ fun EqualizerScreen(
                             Icon(
                                 imageVector = Icons.Default.Speed,
                                 contentDescription = null,
-                                tint = if (eqEnabled) EqNeonGreen else TextMuted,
+                                tint = if (eqEnabled && isExternalAudioConnected) EqNeonGreen else TextMuted,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -742,8 +411,8 @@ fun EqualizerScreen(
                                 )
                             )
                             Text(
-                                text = "Low-frequency punch enhancement",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
+                                text = if (isExternalAudioConnected) "Low-frequency punch enhancement" else "Requires Bluetooth or Wired Aux connection",
+                                style = MaterialTheme.typography.labelSmall.copy(color = if (isExternalAudioConnected) TextSecondary else Color(0xFFFFB74D))
                             )
                         }
                     }
@@ -752,7 +421,7 @@ fun EqualizerScreen(
                         text = "${(bassBoostLevel * 100).toInt()}%",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Black,
-                            color = if (eqEnabled) EqNeonGreen else TextMuted
+                            color = if (eqEnabled && isExternalAudioConnected) EqNeonGreen else TextMuted
                         )
                     )
                 }
@@ -762,7 +431,7 @@ fun EqualizerScreen(
                 Slider(
                     value = bassBoostLevel,
                     onValueChange = onBassBoostChange,
-                    enabled = eqEnabled,
+                    enabled = eqEnabled && isExternalAudioConnected,
                     colors = SliderDefaults.colors(
                         thumbColor = EqNeonGreen,
                         activeTrackColor = EqNeonGreen,
@@ -794,10 +463,18 @@ fun EqualizerScreen(
 
             TextButton(
                 onClick = {
-                    presetNameInput = ""
-                    showSavePresetDialog = true
+                    if (!isExternalAudioConnected) {
+                        showSpeakerWarningToast()
+                    } else {
+                        presetNameInput = ""
+                        showSavePresetDialog = true
+                    }
                 },
-                colors = ButtonDefaults.textButtonColors(contentColor = EqNeonGreen),
+                enabled = isExternalAudioConnected && eqEnabled,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = EqNeonGreen,
+                    disabledContentColor = TextMuted.copy(alpha = 0.4f)
+                ),
                 modifier = Modifier.testTag("save_current_preset_btn")
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -814,11 +491,17 @@ fun EqualizerScreen(
         ) {
             // User-Saved Custom Presets
             items(customPresets, key = { it.id }) { customPreset ->
-                val isSelected = selectedCustomPresetId == customPreset.id && eqEnabled
+                val isSelected = selectedCustomPresetId == customPreset.id && eqEnabled && isExternalAudioConnected
                 FilterChip(
                     selected = isSelected,
-                    onClick = { onCustomPresetSelect(customPreset) },
-                    enabled = true,
+                    onClick = {
+                        if (!isExternalAudioConnected) {
+                            showSpeakerWarningToast()
+                        } else {
+                            onCustomPresetSelect(customPreset)
+                        }
+                    },
+                    enabled = isExternalAudioConnected,
                     label = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -845,7 +528,7 @@ fun EqualizerScreen(
                         labelColor = Color.White
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
+                        enabled = isExternalAudioConnected,
                         selected = isSelected,
                         borderColor = if (isSelected) EqNeonGreen else DarkCardBorder,
                         selectedBorderColor = EqNeonGreen
@@ -856,11 +539,17 @@ fun EqualizerScreen(
 
             // Built-in Presets
             items(EqPreset.entries.toTypedArray()) { preset ->
-                val isSelected = selectedCustomPresetId == null && selectedPreset == preset && eqEnabled
+                val isSelected = selectedCustomPresetId == null && selectedPreset == preset && eqEnabled && isExternalAudioConnected
                 FilterChip(
                     selected = isSelected,
-                    onClick = { onPresetSelect(preset) },
-                    enabled = true,
+                    onClick = {
+                        if (!isExternalAudioConnected) {
+                            showSpeakerWarningToast()
+                        } else {
+                            onPresetSelect(preset)
+                        }
+                    },
+                    enabled = isExternalAudioConnected,
                     label = { Text(preset.displayName, fontWeight = FontWeight.Medium) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = EqNeonGreen,
@@ -869,7 +558,7 @@ fun EqualizerScreen(
                         labelColor = TextSecondary
                     ),
                     border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
+                        enabled = isExternalAudioConnected,
                         selected = isSelected,
                         borderColor = DarkCardBorder,
                         selectedBorderColor = EqNeonGreen
@@ -898,11 +587,15 @@ fun EqualizerScreen(
 
             OutlinedButton(
                 onClick = { onPresetSelect(EqPreset.FLAT) },
-                enabled = eqEnabled,
+                enabled = eqEnabled && isExternalAudioConnected,
                 colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = EqNeonGreen
+                    contentColor = EqNeonGreen,
+                    disabledContentColor = TextMuted.copy(alpha = 0.4f)
                 ),
-                border = androidx.compose.foundation.BorderStroke(1.dp, EqNeonGreen.copy(alpha = 0.5f)),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (eqEnabled && isExternalAudioConnected) EqNeonGreen.copy(alpha = 0.5f) else DarkCardBorder
+                ),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(
@@ -943,7 +636,7 @@ fun EqualizerScreen(
                             text = "${if (gainDb > 0) "+" else ""}${gainDb.toInt()}dB",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
-                                color = if (gainDb != 0f && eqEnabled) EqNeonGreen else TextMuted,
+                                color = if (gainDb != 0f && eqEnabled && isExternalAudioConnected) EqNeonGreen else TextMuted,
                                 fontSize = 11.sp
                             )
                         )
@@ -954,7 +647,7 @@ fun EqualizerScreen(
                             value = gainDb,
                             onValueChange = { newGain -> onBandGainChange(i, newGain) },
                             valueRange = -12f..12f,
-                            enabled = eqEnabled,
+                            enabled = eqEnabled && isExternalAudioConnected,
                             modifier = Modifier.testTag("eq_band_slider_$i")
                         )
 

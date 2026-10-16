@@ -230,9 +230,9 @@ fun AnimatedSplashScreen(
                     .background(CyberDeepBackground),
                 contentAlignment = Alignment.Center
             ) {
-                // HARMANX Logo Asset
+                // HARMANX Custom Vector Logo
                 Image(
-                    painter = painterResource(id = R.drawable.harmanx_music_app_logo_1786194716963),
+                    painter = painterResource(id = R.drawable.ic_harmanx_custom_logo),
                     contentDescription = "HARMANX Logo",
                     modifier = Modifier
                         .size(92.dp)

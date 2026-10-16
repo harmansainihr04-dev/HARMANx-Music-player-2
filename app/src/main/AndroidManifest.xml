@@ -27,7 +27,7 @@
             android:resource="@xml/automotive_app_desc" />
         <meta-data
             android:name="com.google.android.gms.car.notification.SmallIcon"
-            android:resource="@drawable/harmanx_music_app_logo_1786194716963" />
+            android:resource="@drawable/ic_harmanx_custom_logo" />
 
         <service
             android:name=".audio.HarmanxMediaBrowserService"

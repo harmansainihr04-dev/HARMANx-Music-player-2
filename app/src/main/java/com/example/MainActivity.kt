@@ -181,6 +181,8 @@ fun AuraMusicApp(
     val repeatMode by viewModel.repeatMode.collectAsStateWithLifecycle()
     val isGaplessEnabled by viewModel.isGaplessEnabled.collectAsStateWithLifecycle()
 
+    val isExternalAudioConnected by viewModel.isExternalAudioConnected.collectAsStateWithLifecycle()
+    val isAuxSimulated by viewModel.isAuxSimulated.collectAsStateWithLifecycle()
     val eqEnabled by viewModel.eqEnabled.collectAsStateWithLifecycle()
     val bassBoostLevel by viewModel.bassBoostLevel.collectAsStateWithLifecycle()
     val surround360Enabled by viewModel.surround360Enabled.collectAsStateWithLifecycle()
@@ -383,6 +385,9 @@ fun AuraMusicApp(
 
                 NavTab.EQUALIZER -> EqualizerScreen(
                     eqEnabled = eqEnabled,
+                    isExternalAudioConnected = isExternalAudioConnected,
+                    isAuxSimulated = isAuxSimulated,
+                    onToggleSimulateAux = { viewModel.toggleSimulateAux() },
                     bassBoostLevel = bassBoostLevel,
                     surround360Enabled = surround360Enabled,
                     spatialMode = spatialMode,
@@ -410,7 +415,10 @@ fun AuraMusicApp(
                 NavTab.SETTINGS -> SettingsScreen(
                     isGaplessEnabled = isGaplessEnabled,
                     onToggleGapless = { viewModel.toggleGaplessMode() },
-                    onScanStorageClick = { viewModel.scanDeviceAudioFiles() }
+                    onScanStorageClick = { viewModel.scanDeviceAudioFiles() },
+                    isAuxSimulated = isAuxSimulated,
+                    isExternalAudioConnected = isExternalAudioConnected,
+                    onToggleSimulateAux = { viewModel.toggleSimulateAux() }
                 )
             }
 

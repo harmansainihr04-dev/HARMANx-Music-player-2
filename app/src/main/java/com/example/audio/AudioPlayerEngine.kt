@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
@@ -120,6 +122,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
                 Log.d("AudioPlayerEngine", "ACTION_AUDIO_BECOMING_NOISY received (Bluetooth/Headphones disconnected) -> Pausing playback")
                 pausePlayback()
+                checkAudioOutputDevices()
             }
         }
     }
@@ -184,7 +187,15 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val _isGaplessEnabled = MutableStateFlow(false)
     val isGaplessEnabled: StateFlow<Boolean> = _isGaplessEnabled.asStateFlow()
 
-    // Equalizer State (Default: OFF)
+    // External Audio Routing State (Bluetooth / Wired Aux detection)
+    private val _isPhysicalExternalAudioConnected = MutableStateFlow(false)
+    private val _isAuxSimulated = MutableStateFlow(false)
+    private val _isExternalAudioConnected = MutableStateFlow(false)
+    val isExternalAudioConnected: StateFlow<Boolean> = _isExternalAudioConnected.asStateFlow()
+    val isAuxSimulated: StateFlow<Boolean> = _isAuxSimulated.asStateFlow()
+    private var userEqPreference = false
+
+    // Equalizer State (Default: OFF - enabled ONLY when Bluetooth or Wired Aux is connected)
     private val _eqEnabled = MutableStateFlow(false)
     val eqEnabled: StateFlow<Boolean> = _eqEnabled.asStateFlow()
 
@@ -288,7 +299,125 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         _customPresets.value = loadCustomPresets()
         handler.post(progressUpdater)
         PlaybackControlReceiver.audioPlayerEngine = this
+        initAudioDeviceMonitoring()
         restoreLastPlaybackState()
+    }
+
+    private fun initAudioDeviceMonitoring() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                audioManager.registerAudioDeviceCallback(object : AudioDeviceCallback() {
+                    override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                        Log.d("AudioPlayerEngine", "Audio devices added -> checking connection")
+                        checkAudioOutputDevices()
+                    }
+                    override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                        Log.d("AudioPlayerEngine", "Audio devices removed -> checking connection")
+                        checkAudioOutputDevices()
+                    }
+                }, handler)
+            } catch (e: Exception) {
+                Log.e("AudioPlayerEngine", "Failed to register AudioDeviceCallback", e)
+            }
+        }
+
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_HEADSET_PLUG)
+                addAction("android.bluetooth.adapter.action.CONNECTION_STATE_CHANGED")
+                addAction("android.bluetooth.device.action.ACL_CONNECTED")
+                addAction("android.bluetooth.device.action.ACL_DISCONNECTED")
+                addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            }
+            context.registerReceiver(object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, intent: Intent?) {
+                    Log.d("AudioPlayerEngine", "Audio broadcast received: ${intent?.action}")
+                    handler.postDelayed({ checkAudioOutputDevices() }, 300)
+                }
+            }, filter)
+        } catch (e: Exception) {
+            Log.e("AudioPlayerEngine", "Failed to register audio intent receiver", e)
+        }
+
+        checkAudioOutputDevices()
+    }
+
+    fun checkAudioOutputDevices() {
+        val physicalConnected = isExternalAudioDeviceConnected()
+        _isPhysicalExternalAudioConnected.value = physicalConnected
+        val effectiveConnected = physicalConnected || _isAuxSimulated.value
+        val previousEffective = _isExternalAudioConnected.value
+        _isExternalAudioConnected.value = effectiveConnected
+
+        Log.d("AudioPlayerEngine", "Audio output: physical=$physicalConnected, simulated=${_isAuxSimulated.value}, effective=$effectiveConnected (previous=$previousEffective)")
+
+        if (!effectiveConnected) {
+            // When disconnected from Bluetooth / Aux and on normal device speakers:
+            // Equalizer MUST NOT WORK and MUST NOT REMAIN ACTIVE!
+            if (_eqEnabled.value) {
+                userEqPreference = true
+                Log.d("AudioPlayerEngine", "Normal device speakers active: Equalizer suspended to protect speakers.")
+                disableEqualizerHardwareEffect()
+                _eqEnabled.value = false
+                notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
+            }
+        } else {
+            // When Bluetooth or Aux connects:
+            // If user had previously enabled EQ, restore it smoothly!
+            if (userEqPreference && !_eqEnabled.value) {
+                Log.d("AudioPlayerEngine", "External audio connected: Restoring Equalizer.")
+                setEqEnabledInternal(true)
+            }
+        }
+    }
+
+    fun setSimulateAux(simulated: Boolean) {
+        _isAuxSimulated.value = simulated
+        checkAudioOutputDevices()
+    }
+
+    fun toggleSimulateAux() {
+        setSimulateAux(!_isAuxSimulated.value)
+    }
+
+    private fun isExternalAudioDeviceConnected(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                devices.any { device ->
+                    when (device.type) {
+                        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                        AudioDeviceInfo.TYPE_AUX_LINE,
+                        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                        AudioDeviceInfo.TYPE_USB_DEVICE -> true
+                        else -> {
+                            var matched = false
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && device.type == AudioDeviceInfo.TYPE_USB_HEADSET) {
+                                matched = true
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && device.type == AudioDeviceInfo.TYPE_HEARING_AID) {
+                                matched = true
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                // 26 = TYPE_BLE_HEADSET, 27 = TYPE_BLE_SPEAKER, 30 = TYPE_BLE_BROADCAST
+                                if (device.type == 26 || device.type == 27 || device.type == 30) {
+                                    matched = true
+                                }
+                            }
+                            matched
+                        }
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isWiredHeadsetOn || audioManager.isBluetoothA2dpOn || audioManager.isBluetoothScoOn
+            }
+        } catch (e: Exception) {
+            Log.e("AudioPlayerEngine", "Error detecting audio output devices", e)
+            false
+        }
     }
 
     private fun savePlaybackState(positionMs: Long) {
@@ -739,7 +868,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
                 val baseTempoBpm = 110 + (trackSeed * 8)
 
-                var currentSmoothedBass = if (_eqEnabled.value) _bassBoostLevel.value else 0f
+                val canApplyEq = _eqEnabled.value && _isExternalAudioConnected.value
+                var currentSmoothedBass = if (canApplyEq) _bassBoostLevel.value else 0f
                 var currentSmoothedSurround = if (_surround360Enabled.value) (_surroundStrength.value * _spatialMode.value.virtualizerStrength) else 0f
 
                 // Algorithmic Schroeder Reverb comb-filter ring buffers (Room, Hall, Large Hall)
@@ -753,7 +883,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                     val samplesPerBeat = (sampleRate * 60.0 / effectiveTempo).toInt().coerceAtLeast(100)
                     val pitchFactor = if (_isSlowedReverbEnabled.value) 0.90 else currentSpeed.toDouble()
 
-                    val targetBass = if (_eqEnabled.value) _bassBoostLevel.value else 0f
+                    val isEqActive = _eqEnabled.value && _isExternalAudioConnected.value
+                    val targetBass = if (isEqActive) _bassBoostLevel.value else 0f
                     val targetSurround = if (_surround360Enabled.value) (_surroundStrength.value * _spatialMode.value.virtualizerStrength) else 0f
                     currentSmoothedBass += (targetBass - currentSmoothedBass) * 0.05f
                     currentSmoothedSurround += (targetSurround - currentSmoothedSurround) * 0.05f
@@ -761,9 +892,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                     val bassBoostGain = 1.0 + (currentSmoothedBass * 2.8)
                     val currentSpatialMode = _spatialMode.value
                     val clarityBoost = if (_surround360Enabled.value) currentSpatialMode.centerClarityBoost else 0f
-                    val eqLow = if (_eqEnabled.value) (1.0 + (_bandGains.value.getOrElse(0) { 0f } / 12.0) * 0.8) else 1.0
-                    val eqMid = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(2) { 0f } / 12.0) + clarityBoost) * 0.8) else (1.0 + clarityBoost * 0.8)
-                    val eqHigh = if (_eqEnabled.value) (1.0 + ((_bandGains.value.getOrElse(4) { 0f } / 12.0) + (clarityBoost * 0.5f)) * 0.8) else (1.0 + clarityBoost * 0.5f * 0.8)
+                    val eqLow = if (isEqActive) (1.0 + (_bandGains.value.getOrElse(0) { 0f } / 12.0) * 0.8) else 1.0
+                    val eqMid = if (isEqActive) (1.0 + ((_bandGains.value.getOrElse(2) { 0f } / 12.0) + clarityBoost) * 0.8) else (1.0 + clarityBoost * 0.8)
+                    val eqHigh = if (isEqActive) (1.0 + ((_bandGains.value.getOrElse(4) { 0f } / 12.0) + (clarityBoost * 0.5f)) * 0.8) else (1.0 + clarityBoost * 0.5f * 0.8)
 
                     val activeReverb = _selectedReverb.value
                     val (reverbFeedback, reverbWet) = when (activeReverb) {
@@ -869,15 +1000,18 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     private fun setupAudioFx(sessionId: Int) {
+        val canEnableEq = _eqEnabled.value && _isExternalAudioConnected.value
         // Safely initialize Equalizer
         try {
             equalizerFx?.release()
             equalizerFx = null
             if (sessionId != 0) {
                 equalizerFx = Equalizer(0, sessionId).apply {
-                    enabled = _eqEnabled.value
+                    enabled = canEnableEq
                 }
-                applyEqualizerGains()
+                if (canEnableEq) {
+                    applyEqualizerGains()
+                }
             }
         } catch (e: Exception) {
             Log.d("AudioPlayerEngine", "Equalizer FX init info", e)
@@ -889,8 +1023,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             bassBoostFx = null
             if (sessionId != 0) {
                 bassBoostFx = BassBoost(0, sessionId).apply {
-                    enabled = _eqEnabled.value
-                    if (strengthSupported) {
+                    enabled = canEnableEq
+                    if (strengthSupported && canEnableEq) {
                         setStrength((_bassBoostLevel.value * 1000).toInt().toShort())
                     }
                 }
@@ -1159,7 +1293,19 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     // Equalizer Controls with Smooth Cross-Fade Transitions
-    fun setEqEnabled(enabled: Boolean) {
+    fun setEqEnabled(enabled: Boolean): Boolean {
+        if (enabled && !_isExternalAudioConnected.value) {
+            Log.w("AudioPlayerEngine", "Equalizer blocked: Normal device speakers in use. Bluetooth or wired aux required.")
+            _eqEnabled.value = false
+            userEqPreference = false
+            return false
+        }
+        userEqPreference = enabled
+        setEqEnabledInternal(enabled)
+        return true
+    }
+
+    private fun setEqEnabledInternal(enabled: Boolean) {
         _eqEnabled.value = enabled
         notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
         eqTransitionJob?.cancel()
@@ -1217,6 +1363,14 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 } catch (_: Exception) {}
             }
         }
+    }
+
+    private fun disableEqualizerHardwareEffect() {
+        eqTransitionJob?.cancel()
+        try {
+            equalizerFx?.enabled = false
+            bassBoostFx?.enabled = false
+        } catch (_: Exception) {}
     }
 
     private fun loadCustomPresets(): List<CustomEqPreset> {
@@ -1301,28 +1455,30 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     fun selectCustomPreset(preset: CustomEqPreset, enableEqIfOff: Boolean = true) {
         _selectedCustomPresetId.value = preset.id
         _selectedPreset.value = EqPreset.CUSTOM
-        if (enableEqIfOff && !_eqEnabled.value) {
+        if (enableEqIfOff && !_eqEnabled.value && _isExternalAudioConnected.value) {
             setEqEnabled(true)
         }
         _bandGains.value = preset.gains.copyOf()
         _bassBoostLevel.value = preset.bassBoost
-        applyEqualizerGains()
-        if (_eqEnabled.value) {
-            try {
-                if (bassBoostFx?.strengthSupported == true) {
-                    bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
-                }
-            } catch (_: Exception) {}
+        if (_isExternalAudioConnected.value) {
+            applyEqualizerGains()
+            if (_eqEnabled.value) {
+                try {
+                    if (bassBoostFx?.strengthSupported == true) {
+                        bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
+                    }
+                } catch (_: Exception) {}
+            }
         }
         notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
     }
 
     fun setBassBoost(level: Float) { // 0.0f to 1.0f
         _bassBoostLevel.value = level
-        if (!_eqEnabled.value && level > 0f) {
+        if (!_eqEnabled.value && level > 0f && _isExternalAudioConnected.value) {
             setEqEnabled(true)
         }
-        if (_eqEnabled.value) {
+        if (_eqEnabled.value && _isExternalAudioConnected.value) {
             try {
                 if (bassBoostFx?.strengthSupported == true) {
                     bassBoostFx?.setStrength((level * 1000).toInt().toShort())
@@ -1341,10 +1497,12 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         newGains[bandIndex] = gainDb
         _bandGains.value = newGains
 
-        if (!_eqEnabled.value) {
+        if (!_eqEnabled.value && _isExternalAudioConnected.value) {
             setEqEnabled(true)
         }
-        applyEqualizerGains()
+        if (_isExternalAudioConnected.value) {
+            applyEqualizerGains()
+        }
         _selectedCustomPresetId.value = null
         if (_selectedPreset.value != EqPreset.CUSTOM) {
             _selectedPreset.value = EqPreset.CUSTOM
@@ -1354,19 +1512,21 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     fun selectPreset(preset: EqPreset, enableEqIfOff: Boolean = true) {
         _selectedCustomPresetId.value = null
         _selectedPreset.value = preset
-        if (enableEqIfOff && !_eqEnabled.value) {
+        if (enableEqIfOff && !_eqEnabled.value && _isExternalAudioConnected.value) {
             setEqEnabled(true)
         }
         if (preset != EqPreset.CUSTOM) {
             _bandGains.value = preset.gains.copyOf()
             _bassBoostLevel.value = preset.bassBoost
-            applyEqualizerGains()
-            if (_eqEnabled.value) {
-                try {
-                    if (bassBoostFx?.strengthSupported == true) {
-                        bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
-                    }
-                } catch (_: Exception) {}
+            if (_isExternalAudioConnected.value) {
+                applyEqualizerGains()
+                if (_eqEnabled.value) {
+                    try {
+                        if (bassBoostFx?.strengthSupported == true) {
+                            bassBoostFx?.setStrength((preset.bassBoost * 1000).toInt().toShort())
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         }
         notificationManager.updateNotification(_currentTrack.value, _isPlaying.value, _currentPositionMs.value)
@@ -1378,6 +1538,10 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     fun cycleEqPreset() {
+        if (!_isExternalAudioConnected.value) {
+            Log.d("AudioPlayerEngine", "Preset cycling ignored on device speaker")
+            return
+        }
         val presets = listOf(
             EqPreset.BASS_BOOSTER,
             EqPreset.CUSTOM_BASS,
@@ -1395,6 +1559,10 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     fun cycleBassBoost() {
+        if (!_isExternalAudioConnected.value) {
+            Log.d("AudioPlayerEngine", "Bass boost cycling ignored on device speaker")
+            return
+        }
         if (!_eqEnabled.value) {
             setEqEnabled(true)
         }
@@ -1409,7 +1577,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     private fun applyEqualizerGains() {
-        if (!_eqEnabled.value) return
+        if (!_eqEnabled.value || !_isExternalAudioConnected.value) return
         try {
             val eq = equalizerFx ?: return
             val numBands = eq.numberOfBands.toInt()

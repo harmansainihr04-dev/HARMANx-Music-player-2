@@ -145,13 +145,13 @@ fun LibraryScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             androidx.compose.foundation.Image(
-                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.harmanx_music_app_logo_1786194716963),
+                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_harmanx_custom_logo),
                 contentDescription = "HARMANX Music Logo",
                 modifier = Modifier
                     .size(42.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .border(1.dp, CyberNeonCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(

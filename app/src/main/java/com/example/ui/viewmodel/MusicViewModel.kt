@@ -67,6 +67,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val isGaplessEnabled = playerEngine.isGaplessEnabled
 
     // Equalizer & Spatial Audio state forwards
+    val isExternalAudioConnected = playerEngine.isExternalAudioConnected
+    val isAuxSimulated = playerEngine.isAuxSimulated
     val eqEnabled = playerEngine.eqEnabled
     val bassBoostLevel = playerEngine.bassBoostLevel
     val surround360Enabled = playerEngine.surround360Enabled
@@ -206,6 +208,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleGaplessMode() = playerEngine.toggleGaplessMode()
 
     fun setEqEnabled(enabled: Boolean) = playerEngine.setEqEnabled(enabled)
+    fun toggleSimulateAux() = playerEngine.toggleSimulateAux()
+    fun setSimulateAux(simulated: Boolean) = playerEngine.setSimulateAux(simulated)
+    fun checkAudioOutputDevices() = playerEngine.checkAudioOutputDevices()
     fun setBassBoost(level: Float) = playerEngine.setBassBoost(level)
     fun setSurround360Enabled(enabled: Boolean) = playerEngine.setSurround360Enabled(enabled)
     fun setSpatialMode(mode: SpatialMode) = playerEngine.setSpatialMode(mode)

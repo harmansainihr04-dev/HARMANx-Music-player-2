@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,6 +53,10 @@ import com.example.ui.theme.CyberSurfaceVariant
 import com.example.ui.theme.CyberTextMuted
 import com.example.ui.theme.CyberTextPrimary
 import com.example.ui.theme.CyberTextSecondary
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Headphones
+import com.example.ui.theme.EqNeonGreen
+import com.example.ui.theme.EqNeonGreenAccent
 import com.example.ui.theme.FlacBadgeGreen
 
 @Composable
@@ -59,6 +64,9 @@ fun SettingsScreen(
     isGaplessEnabled: Boolean,
     onToggleGapless: () -> Unit,
     onScanStorageClick: () -> Unit,
+    isAuxSimulated: Boolean = false,
+    isExternalAudioConnected: Boolean = false,
+    onToggleSimulateAux: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -82,7 +90,7 @@ fun SettingsScreen(
                 )
             )
             Text(
-                text = "Gapless Playback & Device Configuration",
+                text = "Device Configuration & Audio DSP Routing",
                 style = MaterialTheme.typography.labelSmall.copy(color = CyberTextSecondary)
             )
         }
@@ -297,6 +305,77 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Simulate Aux Audio (Developer / Emulator Audio Routing Test) Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .border(
+                    1.dp,
+                    if (isAuxSimulated) EqNeonGreen.copy(alpha = 0.6f) else CyberSurfaceVariant,
+                    RoundedCornerShape(16.dp)
+                ),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isAuxSimulated) CyberSurfaceDark.copy(alpha = 0.95f) else CyberSurfaceDark
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isAuxSimulated) EqNeonGreen.copy(alpha = 0.18f)
+                                else if (isExternalAudioConnected) CyberNeonCyan.copy(alpha = 0.18f)
+                                else CyberSurfaceVariant
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Headphones,
+                            contentDescription = "External Audio / Aux",
+                            tint = if (isAuxSimulated) EqNeonGreen else if (isExternalAudioConnected) CyberNeonCyan else CyberTextMuted,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Text(
+                        text = "Simulate Aux (Test)",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = CyberTextPrimary
+                        )
+                    )
+                }
+
+                Switch(
+                    checked = isAuxSimulated,
+                    onCheckedChange = { onToggleSimulateAux() },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = EqNeonGreen,
+                        checkedTrackColor = EqNeonGreen.copy(alpha = 0.35f),
+                        uncheckedThumbColor = CyberTextMuted,
+                        uncheckedTrackColor = CyberSurfaceVariant
+                    ),
+                    modifier = Modifier.testTag("simulate_aux_setting_switch")
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Background Playback & Battery Optimization Card
         Card(
             modifier = Modifier
@@ -328,12 +407,6 @@ fun SettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = "Foreground Service with CPU WakeLock is active. To prevent Android battery saver or OEM task killer from pausing/killing music when the screen is locked or apps are switched, tap below to set battery usage to Unrestricted.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = CyberTextSecondary)
-                )
-
                 Spacer(modifier = Modifier.height(14.dp))
 
                 val context = LocalContext.current
