@@ -26,6 +26,8 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.db.AuraDatabase
 import com.example.data.model.Track
+import com.example.data.network.isLiveRadio
+import com.example.data.network.isOnlineStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -106,6 +108,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var primaryPlayer: MediaPlayer? = null
+    private var pendingAsyncPlayer: MediaPlayer? = null
+    private var primaryPlayerGeneration: Long = 0L
     private var nextPlayer: MediaPlayer? = null
     private var fadingOutPlayer: MediaPlayer? = null
     private var nextPlayerTrack: Track? = null
@@ -116,9 +120,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private var plannedNextIndex: Int? = null
     private var isCrossfading: Boolean = false
     private var crossfadeJob: Job? = null
-
-    private var currentTrimBounds: AudioSilenceDetector.TrimBounds? = null
-    private var silenceAnalysisJob: Job? = null
     
     private var equalizerFx: Equalizer? = null
     private var bassBoostFx: BassBoost? = null
@@ -204,6 +205,19 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val _isGaplessEnabled = MutableStateFlow(true)
     val isGaplessEnabled: StateFlow<Boolean> = _isGaplessEnabled.asStateFlow()
 
+    private val _crossfadeDurationSec = MutableStateFlow(DEFAULT_CROSSFADE_SEC)
+    val crossfadeDurationSec: StateFlow<Int> = _crossfadeDurationSec.asStateFlow()
+
+    private val _isBuffering = MutableStateFlow(false)
+    val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
+
+    private val _playbackError = MutableStateFlow<String?>(null)
+    val playbackError: StateFlow<String?> = _playbackError.asStateFlow()
+
+    fun clearPlaybackError() {
+        _playbackError.value = null
+    }
+
     // External Audio Routing State (Bluetooth / Wired Aux detection)
     private val _isPhysicalExternalAudioConnected = MutableStateFlow(false)
     private val _isAuxSimulated = MutableStateFlow(false)
@@ -265,48 +279,48 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     private val progressUpdater = object : Runnable {
         override fun run() {
             primaryPlayer?.let { player ->
-                if (player.isPlaying) {
-                    val curPos = player.currentPosition.toLong()
-                    val dur = player.duration.toLong()
-                    _currentPositionMs.value = curPos
-                    _durationMs.value = dur
-                    
-                    // Periodically persist playback position every ~2 seconds
-                    if (Math.abs(curPos - lastSavedPosition) >= 2000) {
-                        lastSavedPosition = curPos
-                        savePlaybackState(curPos)
-                    }
+                try {
+                    if (player.isPlaying) {
+                        val isLive = _currentTrack.value?.isLiveRadio == true
+                        val curPos = player.currentPosition.toLong().coerceAtLeast(0L)
+                        val dur = if (isLive) 0L else player.duration.toLong().coerceAtLeast(0L)
+                        _currentPositionMs.value = curPos
+                        if (!isLive && dur > 0L) {
+                            _durationMs.value = dur
+                        }
 
-                    // Smooth Crossfade / Gapless Transition Engine (active only when Gapless toggle is ON)
-                    if (_isGaplessEnabled.value && dur > 3000L && !isCrossfading) {
-                        val effectiveCrossfadeMs = minOf(AUTO_CROSSFADE_MS, (dur / 2L).coerceAtLeast(1000L))
-                        val remainingMs = dur - curPos
+                        // Periodically persist playback position every ~2 seconds (local tracks)
+                        if (!isLive && Math.abs(curPos - lastSavedPosition) >= 2000) {
+                            lastSavedPosition = curPos
+                            savePlaybackState(curPos)
+                        }
 
-                        if (remainingMs in 1L..effectiveCrossfadeMs) {
-                            if (isNextPlayerPrepared && nextPlayer != null) {
-                                startCrossfadeTransition(remainingMs)
-                            } else {
-                                triggerAutoCrossfadeNext(remainingMs)
-                            }
-                        } else {
-                            // Only cut trailing dead air when genuine digital silence (>800ms) was confirmed
-                            val bounds = currentTrimBounds
-                            if (bounds != null && bounds.outroEndMs < dur - 800L && curPos >= bounds.outroEndMs && curPos < dur) {
-                                Log.d("AudioPlayerEngine", "Gapless active: Genuine dead air at ${curPos}ms (total ${dur}ms). Transitioning seamlessly.")
-                                playNext()
+                        // Smooth Crossfade / Gapless Transition Engine (active only when Gapless toggle is ON)
+                        val configuredAutoMs = autoCrossfadeMs()
+                        if (!isLive && _isGaplessEnabled.value && configuredAutoMs > 0L && dur > 3000L && !isCrossfading) {
+                            val effectiveCrossfadeMs = minOf(configuredAutoMs, (dur / 2L).coerceAtLeast(1000L))
+                            val remainingMs = dur - curPos
+
+                            if (remainingMs in 1L..effectiveCrossfadeMs) {
+                                if (isNextPlayerPrepared && nextPlayer != null) {
+                                    startCrossfadeTransition(remainingMs)
+                                } else {
+                                    triggerAutoCrossfadeNext(remainingMs)
+                                }
                             }
                         }
                     }
-                }
+                } catch (_: IllegalStateException) {}
             } ?: run {
                 if (isSynthPlaying) {
                     val newPos = (_currentPositionMs.value + 150).coerceAtMost(_durationMs.value)
                     _currentPositionMs.value = newPos
                     val dur = _durationMs.value
                     val remainingMs = dur - newPos
-                    if (_isGaplessEnabled.value && dur > 3000L && !isCrossfading) {
+                    val configuredAutoMs = autoCrossfadeMs()
+                    if (_isGaplessEnabled.value && configuredAutoMs > 0L && dur > 3000L && !isCrossfading) {
                         val effectiveCrossfadeMs = minOf(
-                            AUTO_CROSSFADE_MS,
+                            configuredAutoMs,
                             (dur / 2L).coerceAtLeast(1000L)
                         )
                         if (remainingMs in 1L..effectiveCrossfadeMs) {
@@ -327,6 +341,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     init {
         val savedGapless = prefs.getBoolean("gapless_enabled", true)
         _isGaplessEnabled.value = savedGapless
+        val savedCrossfadeSec = prefs.getInt("crossfade_duration_sec", DEFAULT_CROSSFADE_SEC)
+            .coerceIn(0, MAX_CROSSFADE_SEC)
+        _crossfadeDurationSec.value = savedCrossfadeSec
         _customPresets.value = loadCustomPresets()
         handler.post(progressUpdater)
         PlaybackControlReceiver.audioPlayerEngine = this
@@ -711,15 +728,17 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     fun playTrack(track: Track, startPositionMs: Long = 0L, crossfadeOverrideMs: Long? = null) {
+        val baseFade = crossfadeOverrideMs ?: manualSkipCrossfadeMs()
         val shouldSmoothCrossfade = startPositionMs == 0L &&
             _isGaplessEnabled.value &&
+            baseFade > 0L &&
             _isPlaying.value &&
             (primaryPlayer != null || (isSynthPlaying && synthAudioTrack != null))
 
         val fadeDurationMs = if (shouldSmoothCrossfade) {
             val speed = _playbackSpeed.value.coerceIn(0.5f, 1.5f)
-            val baseFade = crossfadeOverrideMs ?: MANUAL_SKIP_CROSSFADE_MS
-            (baseFade / speed).toLong().coerceIn(300L, AUTO_CROSSFADE_MS)
+            val maxFadeMs = maxOf(autoCrossfadeMs(), baseFade)
+            (baseFade / speed).toLong().coerceIn(300L, maxFadeMs)
         } else 0L
 
         if (shouldSmoothCrossfade) {
@@ -728,42 +747,15 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             stopPlayback()
         }
 
+        _playbackError.value = null
         _currentTrack.value = track
-        _durationMs.value = track.durationMs
+        _durationMs.value = if (track.isLiveRadio) 0L else track.durationMs
         plannedNextIndex = null
 
-        // If Gapless Mode is toggled ON: only cut genuine digital dead-air >400ms if cached
-        var actualStartMs = startPositionMs
-        if (_isGaplessEnabled.value && startPositionMs == 0L) {
-            val cached = AudioSilenceDetector.getCached(track.audioPath)
-            if (cached != null && cached.introStartMs > 400L) {
-                actualStartMs = cached.introStartMs
-                Log.d("AudioPlayerEngine", "Gapless active: Cut ${cached.introStartMs}ms digital intro silence.")
-            }
-        }
-
-        _currentPositionMs.value = actualStartMs
+        _currentPositionMs.value = startPositionMs
 
         requestAudioFocus()
         registerBecomingNoisyReceiver()
-
-        // Background silence analysis for genuine digital dead-air only
-        silenceAnalysisJob?.cancel()
-        silenceAnalysisJob = engineScope.launch {
-            val bounds = AudioSilenceDetector.analyzeTrack(context, track.audioPath, track.durationMs)
-            currentTrimBounds = bounds
-
-            if (_isGaplessEnabled.value && startPositionMs == 0L && bounds.introStartMs > 400L) {
-                withContext(Dispatchers.Main) {
-                    primaryPlayer?.let { player ->
-                        if (player.isPlaying && player.currentPosition < bounds.introStartMs && player.currentPosition < 800) {
-                            Log.d("AudioPlayerEngine", "Gapless active: Skipping ${bounds.introStartMs}ms digital intro silence.")
-                            seekTo(bounds.introStartMs)
-                        }
-                    }
-                }
-            }
-        }
 
         // 1. Check if track is a preloaded synthetic sample track
         if (track.audioPath.startsWith("synth_demo_")) {
@@ -779,7 +771,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             return
         }
 
-        // 2. Standard Android MediaPlayer with pre-buffered dual-player gapless support
+        // 2. Standard Android MediaPlayer (async for HTTP/HTTPS streams, instant local prepare for device files)
         try {
             val prevSessionId = currentAudioSessionId
             val player = MediaPlayer().apply {
@@ -797,51 +789,73 @@ class AudioPlayerEngine private constructor(private val context: Context) {
                 }
             }
             setDataSourceRobustly(player, track.audioPath)
-            player.prepare()
 
-            if (actualStartMs > 0 && actualStartMs < track.durationMs) {
-                player.seekTo(actualStartMs.toInt())
-            }
-            if (shouldSmoothCrossfade) {
-                player.setVolume(0f, 0f)
-            }
-            player.start()
-            primaryPlayer = player
-            val newSessionId = player.audioSessionId
-            acquireWakeLock()
-            _isPlaying.value = true
-            if (shouldSmoothCrossfade && prevSessionId != 0 && newSessionId == prevSessionId) {
-                try {
-                    presetReverbFx?.let { reverb ->
-                        player.attachAuxEffect(reverb.id)
-                        player.setAuxEffectSendLevel(if (_selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
+            if (track.isOnlineStream) {
+                val asyncGen = ++primaryPlayerGeneration
+                pendingAsyncPlayer = player
+                _isBuffering.value = true
+                notifyPlaybackState()
+
+                player.setOnPreparedListener { preparedMp ->
+                    if (asyncGen != primaryPlayerGeneration || pendingAsyncPlayer !== preparedMp) {
+                        try { preparedMp.release() } catch (_: Exception) {}
+                        return@setOnPreparedListener
                     }
-                } catch (_: Exception) {}
-            } else {
-                currentAudioSessionId = newSessionId
-                setupAudioFx(currentAudioSessionId)
+                    pendingAsyncPlayer = null
+                    _isBuffering.value = false
+                    onPrimaryMediaPlayerPrepared(
+                        player = preparedMp,
+                        track = track,
+                        actualStartMs = startPositionMs,
+                        shouldSmoothCrossfade = shouldSmoothCrossfade,
+                        prevSessionId = prevSessionId,
+                        fadeDurationMs = fadeDurationMs
+                    )
+                }
+
+                player.setOnErrorListener { failedMp, what, extra ->
+                    Log.e("AudioPlayerEngine", "Stream error for ${track.title}: what=$what extra=$extra")
+                    if (asyncGen == primaryPlayerGeneration) {
+                        pendingAsyncPlayer = null
+                        _isBuffering.value = false
+                        _isPlaying.value = false
+                        if (shouldSmoothCrossfade) {
+                            cancelCrossfade(restoreVolume = false)
+                        }
+                        releaseWakeLock()
+                        _playbackError.value = "Stream unavailable right now for \"${track.title}\". Please try another song or station."
+                        notifyPlaybackState()
+                    }
+                    try { failedMp.release() } catch (_: Exception) {}
+                    true
+                }
+
+                player.prepareAsync()
+                Log.d("AudioPlayerEngine", "Buffering online stream: ${track.title} -> ${track.audioPath}")
+                return
             }
-            applyPlaybackSpeed()
-            player.setOnCompletionListener { onTrackCompleted() }
-            notifyPlaybackState()
-            if (shouldSmoothCrossfade) {
-                runCrossfadeVolumeRamp(
-                    incomingMp = player,
-                    incomingSynth = null,
-                    fadeDurationMs = fadeDurationMs,
-                    incomingTitle = track.title
-                )
-            } else {
-                prepareNextPlayerForGapless()
-            }
-            Log.d("AudioPlayerEngine", "Playing via MediaPlayer: ${track.title} (session=$currentAudioSessionId)")
+
+            player.prepare()
+            onPrimaryMediaPlayerPrepared(
+                player = player,
+                track = track,
+                actualStartMs = startPositionMs,
+                shouldSmoothCrossfade = shouldSmoothCrossfade,
+                prevSessionId = prevSessionId,
+                fadeDurationMs = fadeDurationMs
+            )
             return
         } catch (e: Exception) {
             Log.w("AudioPlayerEngine", "MediaPlayer could not prepare ${track.title} (${e.message})")
+            pendingAsyncPlayer = null
+            _isBuffering.value = false
             try { primaryPlayer?.release() } catch (_: Exception) {}
             primaryPlayer = null
             if (shouldSmoothCrossfade) {
                 cancelCrossfade(restoreVolume = false)
+            }
+            if (track.isOnlineStream) {
+                _playbackError.value = "Could not connect to \"${track.title}\"."
             }
         }
 
@@ -850,6 +864,74 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         _isPlaying.value = false
         releaseWakeLock()
         notifyPlaybackState()
+    }
+
+    private fun onPrimaryMediaPlayerPrepared(
+        player: MediaPlayer,
+        track: Track,
+        actualStartMs: Long,
+        shouldSmoothCrossfade: Boolean,
+        prevSessionId: Int,
+        fadeDurationMs: Long
+    ) {
+        if (!track.isLiveRadio && actualStartMs > 0 && actualStartMs < track.durationMs) {
+            try { player.seekTo(actualStartMs.toInt()) } catch (_: Exception) {}
+        }
+        if (shouldSmoothCrossfade) {
+            try { player.setVolume(0f, 0f) } catch (_: Exception) {}
+        }
+        player.start()
+        primaryPlayer = player
+        val newSessionId = try { player.audioSessionId } catch (_: Exception) { 0 }
+        acquireWakeLock()
+        _isPlaying.value = true
+        _durationMs.value = if (track.isLiveRadio) {
+            0L
+        } else {
+            try {
+                val d = player.duration.toLong()
+                if (d > 0L) d else track.durationMs
+            } catch (_: Exception) { track.durationMs }
+        }
+
+        if (shouldSmoothCrossfade && prevSessionId != 0 && newSessionId == prevSessionId) {
+            try {
+                presetReverbFx?.let { reverb ->
+                    player.attachAuxEffect(reverb.id)
+                    player.setAuxEffectSendLevel(if (_selectedReverb.value != ReverbEffect.OFF) 1.0f else 0.0f)
+                }
+            } catch (_: Exception) {}
+        } else {
+            currentAudioSessionId = newSessionId
+            setupAudioFx(currentAudioSessionId)
+        }
+        if (!track.isLiveRadio || _playbackSpeed.value != 1.0f || _isSlowedReverbEnabled.value) {
+            applyPlaybackSpeed()
+        }
+        player.setOnCompletionListener { onTrackCompleted() }
+        player.setOnErrorListener { _, what, extra ->
+            Log.e("AudioPlayerEngine", "Runtime MediaPlayer error for ${track.title}: $what/$extra")
+            if (track.isOnlineStream) {
+                _playbackError.value = "Connection interrupted for \"${track.title}\"."
+            }
+            _isPlaying.value = false
+            _isBuffering.value = false
+            releaseWakeLock()
+            notifyPlaybackState()
+            true
+        }
+        notifyPlaybackState()
+        if (shouldSmoothCrossfade) {
+            runCrossfadeVolumeRamp(
+                incomingMp = player,
+                incomingSynth = null,
+                fadeDurationMs = fadeDurationMs,
+                incomingTitle = track.title
+            )
+        } else if (!track.isLiveRadio) {
+            prepareNextPlayerForGapless()
+        }
+        Log.d("AudioPlayerEngine", "Playing via MediaPlayer: ${track.title} (session=$currentAudioSessionId)")
     }
 
     private fun setDataSourceRobustly(player: MediaPlayer, audioPath: String) {
@@ -1257,6 +1339,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     fun pausePlayback() {
         cancelCrossfade(restoreVolume = true)
+        if (pendingAsyncPlayer != null) {
+            releasePendingAsyncPlayer()
+        }
         primaryPlayer?.let { player ->
             if (player.isPlaying) {
                 player.pause()
@@ -1303,6 +1388,11 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             return
         }
 
+        if (pendingAsyncPlayer != null || _isBuffering.value) {
+            pausePlayback()
+            return
+        }
+
         if (isSynthPlaying) {
             pausePlayback()
         } else {
@@ -1318,8 +1408,9 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             val next = queue[nextIdx]
             // If nextPlayer is already pre-buffered for this exact track & we aren't mid-crossfade:
             if (_isGaplessEnabled.value && !isCrossfading && isNextPlayerPrepared && nextPlayer != null && nextPlayerQueueIndex == nextIdx && nextPlayerTrack?.id == next.id && primaryPlayer != null) {
-                if (_isPlaying.value) {
-                    startCrossfadeTransition(MANUAL_SKIP_CROSSFADE_MS)
+                val manualFadeMs = manualSkipCrossfadeMs()
+                if (_isPlaying.value && manualFadeMs > 0L) {
+                    startCrossfadeTransition(manualFadeMs)
                 } else {
                     promoteNextPlayerDirectly()
                 }
@@ -1469,7 +1560,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         } catch (_: Exception) { 0L }
 
         notifyPlaybackState()
-        launchSilenceAnalysis(armedTrack)
         prepareNextPlayerForGapless()
         Log.d("AudioPlayerEngine", "0ms Gapless transition completed -> ${armedTrack.title} (session=$currentAudioSessionId)")
     }
@@ -1534,14 +1624,27 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         _currentPositionMs.value = 0L
 
         notifyPlaybackState()
-        launchSilenceAnalysis(armedTrack)
         prepareNextPlayerForGapless()
+    }
+
+    private fun releasePendingAsyncPlayer() {
+        primaryPlayerGeneration++
+        pendingAsyncPlayer?.let { pending ->
+            try {
+                pending.setOnPreparedListener(null)
+                pending.setOnErrorListener(null)
+                pending.setOnCompletionListener(null)
+                pending.release()
+            } catch (_: Exception) {}
+        }
+        pendingAsyncPlayer = null
+        _isBuffering.value = false
     }
 
     private fun detachCurrentSourceForCrossfade() {
         cancelCrossfade(restoreVolume = false)
+        releasePendingAsyncPlayer()
         releaseNextPlayer()
-        silenceAnalysisJob?.cancel()
 
         primaryPlayer?.let { outMp ->
             try { outMp.setOnCompletionListener(null) } catch (_: Exception) {}
@@ -1671,10 +1774,10 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         } catch (_: Exception) { incomingTrack.durationMs }
         _currentPositionMs.value = 0L
         notifyPlaybackState()
-        launchSilenceAnalysis(incomingTrack)
 
         val speed = _playbackSpeed.value.coerceIn(0.5f, 1.5f)
-        val fadeDurationMs = (remainingMs / speed).toLong().coerceIn(300L, AUTO_CROSSFADE_MS)
+        val maxFadeMs = maxOf(autoCrossfadeMs(), remainingMs)
+        val fadeDurationMs = (remainingMs / speed).toLong().coerceIn(300L, maxFadeMs)
         runCrossfadeVolumeRamp(
             incomingMp = incoming,
             incomingSynth = null,
@@ -1695,13 +1798,6 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             }
         } else {
             releaseFadingOutSources()
-        }
-    }
-
-    private fun launchSilenceAnalysis(track: Track) {
-        silenceAnalysisJob?.cancel()
-        silenceAnalysisJob = engineScope.launch {
-            currentTrimBounds = AudioSilenceDetector.analyzeTrack(context, track.audioPath, track.durationMs)
         }
     }
 
@@ -1732,6 +1828,10 @@ class AudioPlayerEngine private constructor(private val context: Context) {
 
     private fun prepareNextPlayerForGapless() {
         if (!_isGaplessEnabled.value || primaryPlayer == null) return
+        if (_currentTrack.value?.isLiveRadio == true) {
+            releaseNextPlayer()
+            return
+        }
         val queue = _playlistQueue.value
         val nextIdx = resolveNextQueueIndex() ?: run {
             releaseNextPlayer()
@@ -1741,7 +1841,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
             releaseNextPlayer()
             return
         }
-        if (nextTrack.audioPath.startsWith("synth_demo_")) {
+        if (nextTrack.audioPath.startsWith("synth_demo_") || nextTrack.isLiveRadio) {
             releaseNextPlayer()
             return
         }
@@ -1818,6 +1918,7 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     fun seekTo(positionMs: Long) {
+        if (_currentTrack.value?.isLiveRadio == true) return
         cancelCrossfade(restoreVolume = true)
         _currentPositionMs.value = positionMs
         primaryPlayer?.seekTo(positionMs.toInt())
@@ -1846,13 +1947,29 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         _isGaplessEnabled.value = !_isGaplessEnabled.value
         prefs.edit().putBoolean("gapless_enabled", _isGaplessEnabled.value).apply()
         if (_isGaplessEnabled.value) {
-            _currentTrack.value?.let { launchSilenceAnalysis(it) }
             prepareNextPlayerForGapless()
         } else {
             cancelCrossfade(restoreVolume = true)
             releaseNextPlayer()
-            currentTrimBounds = null
         }
+    }
+
+    fun setCrossfadeDuration(seconds: Int) {
+        val clamped = seconds.coerceIn(0, MAX_CROSSFADE_SEC)
+        _crossfadeDurationSec.value = clamped
+        prefs.edit().putInt("crossfade_duration_sec", clamped).apply()
+        if (clamped == 0 && isCrossfading) {
+            cancelCrossfade(restoreVolume = true)
+        }
+    }
+
+    private fun autoCrossfadeMs(): Long = _crossfadeDurationSec.value * 1000L
+
+    private fun manualSkipCrossfadeMs(): Long {
+        val autoSec = _crossfadeDurationSec.value
+        if (autoSec <= 0) return 0L
+        return ((MANUAL_SKIP_CROSSFADE_MS * autoSec) / DEFAULT_CROSSFADE_SEC.toLong())
+            .coerceIn(300L, autoSec * 1000L)
     }
 
     // Equalizer Controls with Smooth Cross-Fade Transitions
@@ -2158,8 +2275,8 @@ class AudioPlayerEngine private constructor(private val context: Context) {
         abandonAudioFocus()
 
         cancelCrossfade(restoreVolume = false)
+        releasePendingAsyncPlayer()
         releaseNextPlayer()
-        silenceAnalysisJob?.cancel()
         isSynthPlaying = false
         currentSynthActiveFlag?.set(false)
         currentSynthActiveFlag = null
@@ -2325,8 +2442,10 @@ class AudioPlayerEngine private constructor(private val context: Context) {
     }
 
     companion object {
-        private const val AUTO_CROSSFADE_MS = 8000L
-        private const val MANUAL_SKIP_CROSSFADE_MS = 5000L
+        private const val DEFAULT_CROSSFADE_SEC = 7
+        private const val MAX_CROSSFADE_SEC = 12
+        private const val AUTO_CROSSFADE_MS = 7000L
+        private const val MANUAL_SKIP_CROSSFADE_MS = 4000L
 
         @Volatile
         private var INSTANCE: AudioPlayerEngine? = null

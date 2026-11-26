@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.Track
+import com.example.data.network.OnlineArtworkCache
+import com.example.data.network.isLiveRadio
 import com.example.ui.theme.CyberElectricPurple
 import com.example.ui.theme.CyberNeonCyan
 
@@ -39,17 +42,18 @@ fun TrackArtworkThumbnail(
     shape: Shape = RoundedCornerShape(10.dp)
 ) {
     val context = LocalContext.current
-    var isImageLoadFailed by remember(track.id, track.albumId, track.audioPath) { mutableStateOf(false) }
+    val remoteArtUrl = remember(track.audioPath) { OnlineArtworkCache.get(track.audioPath) }
+    var isImageLoadFailed by remember(track.id, track.albumId, track.audioPath, remoteArtUrl) { mutableStateOf(false) }
 
-    // Build actual artwork URI from MediaStore album art if available
-    val artworkUri: Uri? = remember(track.id, track.albumId) {
-        if (track.albumId > 0) {
-            ContentUris.withAppendedId(
+    // Build actual artwork URI from online URL first, then MediaStore album art if available
+    val artworkData: Any? = remember(track.id, track.albumId, remoteArtUrl) {
+        when {
+            !remoteArtUrl.isNullOrBlank() -> remoteArtUrl
+            track.albumId > 0 -> ContentUris.withAppendedId(
                 Uri.parse("content://media/external/audio/albumart"),
                 track.albumId
             )
-        } else {
-            null
+            else -> null
         }
     }
 
@@ -69,10 +73,10 @@ fun TrackArtworkThumbnail(
             .background(Brush.linearGradient(gradientColors)),
         contentAlignment = Alignment.Center
     ) {
-        if (artworkUri != null && !isImageLoadFailed) {
+        if (artworkData != null && !isImageLoadFailed) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
-                    .data(artworkUri)
+                    .data(artworkData)
                     .crossfade(true)
                     .build(),
                 contentDescription = "Song Thumbnail",
@@ -88,9 +92,9 @@ fun TrackArtworkThumbnail(
         }
 
         // Show fallback icon if no image URI or image load fails
-        if (artworkUri == null || isImageLoadFailed) {
+        if (artworkData == null || isImageLoadFailed) {
             Icon(
-                imageVector = Icons.Default.MusicNote,
+                imageVector = if (track.isLiveRadio) Icons.Default.Radio else Icons.Default.MusicNote,
                 contentDescription = "Track Artwork",
                 tint = Color.White.copy(alpha = 0.9f),
                 modifier = Modifier.size(iconSize)

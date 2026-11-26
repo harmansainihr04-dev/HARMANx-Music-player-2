@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.RepeatMode
 import com.example.data.model.Track
+import com.example.data.network.isLiveRadio
+import com.example.data.network.isOnlineStream
 import com.example.ui.theme.CyberDeepBackground
 import com.example.ui.theme.CyberElectricPurple
 import com.example.ui.theme.CyberNeonCyan
@@ -82,6 +84,7 @@ fun FullPlayerModal(
     isVisible: Boolean,
     currentTrack: Track?,
     isPlaying: Boolean,
+    isBuffering: Boolean = false,
     currentPositionMs: Long,
     durationMs: Long,
     isShuffle: Boolean,
@@ -296,10 +299,16 @@ fun FullPlayerModal(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
+                val formatLabel = when {
+                    currentTrack.isLiveRadio -> "Live Radio Stream"
+                    currentTrack.isOnlineStream -> "iTunes 30s Preview"
+                    currentTrack.isFlac -> "FLAC Lossless Audio"
+                    else -> "Audio Track"
+                }
                 Text(
-                    text = "Format: ${if (currentTrack.isFlac) "FLAC Lossless Audio" else "Audio Track"} | Bitrate: ${currentTrack.bitrate}",
+                    text = if (isBuffering) "Buffering online audio..." else "Format: $formatLabel | Bitrate: ${currentTrack.bitrate}",
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = CyberTextMuted,
+                        color = if (isBuffering) CyberNeonCyan else CyberTextMuted,
                         fontSize = 12.sp
                     )
                 )
@@ -309,16 +318,20 @@ fun FullPlayerModal(
 
             // Seekbar
             Column(modifier = Modifier.fillMaxWidth()) {
-                val progress = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+                val isLive = currentTrack.isLiveRadio
+                val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
 
                 Slider(
-                    value = progress,
+                    value = if (isLive) 1f else progress,
+                    enabled = !isLive,
                     onValueChange = { newProgress ->
-                        onSeekTo((newProgress * durationMs).toLong())
+                        if (!isLive) {
+                            onSeekTo((newProgress * durationMs).toLong())
+                        }
                     },
                     colors = SliderDefaults.colors(
-                        thumbColor = CyberNeonCyan,
-                        activeTrackColor = CyberNeonCyan,
+                        thumbColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
+                        activeTrackColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
                         inactiveTrackColor = CyberSurfaceDark
                     ),
                     modifier = Modifier
@@ -331,11 +344,14 @@ fun FullPlayerModal(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = formatDuration(currentPositionMs),
-                        style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
+                        text = if (isLive) "● LIVE BROADCAST" else formatDuration(currentPositionMs),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = if (isLive) DarkRedPrimary else CyberTextMuted,
+                            fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal
+                        )
                     )
                     Text(
-                        text = formatDuration(durationMs),
+                        text = if (isLive) "24/7 STREAM" else formatDuration(durationMs),
                         style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
                     )
                 }

@@ -13,7 +13,10 @@ import com.example.audio.StorageScanner
 import com.example.data.db.AuraDatabase
 import com.example.data.model.Playlist
 import com.example.data.model.Track
+import com.example.data.network.OnlineMusicRepository
+import com.example.data.network.RadioCategory
 import com.example.data.repository.MusicRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +35,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AuraDatabase.getInstance(application)
     private val storageScanner = StorageScanner(application)
     val repository = MusicRepository(db.trackDao(), db.playlistDao(), storageScanner)
+    private val onlineRepository = OnlineMusicRepository()
     val playerEngine = AudioPlayerEngine.getInstance(application)
 
     private val _searchQuery = MutableStateFlow("")
@@ -60,11 +64,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     // Player state forwards
     val currentTrack = playerEngine.currentTrack
     val isPlaying = playerEngine.isPlaying
+    val isBuffering = playerEngine.isBuffering
+    val playbackError = playerEngine.playbackError
     val currentPositionMs = playerEngine.currentPositionMs
     val durationMs = playerEngine.durationMs
     val isShuffle = playerEngine.isShuffle
     val repeatMode = playerEngine.repeatMode
     val isGaplessEnabled = playerEngine.isGaplessEnabled
+    val crossfadeDurationSec = playerEngine.crossfadeDurationSec
 
     // Equalizer & Spatial Audio state forwards
     val isExternalAudioConnected = playerEngine.isExternalAudioConnected
@@ -88,6 +95,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _lastScanMessage = MutableStateFlow<String?>(null)
     val lastScanMessage: StateFlow<String?> = _lastScanMessage.asStateFlow()
+
+    // Online Music (iTunes 30s Previews + Punjabi/Haryanvi Live Radio)
+    private val _onlineSongs = MutableStateFlow<List<Track>>(emptyList())
+    val onlineSongs: StateFlow<List<Track>> = _onlineSongs.asStateFlow()
+
+    private val _radioStations = MutableStateFlow<List<Track>>(emptyList())
+    val radioStations: StateFlow<List<Track>> = _radioStations.asStateFlow()
+
+    private val _onlineSearchQuery = MutableStateFlow("Punjabi Hits")
+    val onlineSearchQuery: StateFlow<String> = _onlineSearchQuery.asStateFlow()
+
+    private val _selectedRadioCategory = MutableStateFlow(RadioCategory.PUNJABI)
+    val selectedRadioCategory: StateFlow<RadioCategory> = _selectedRadioCategory.asStateFlow()
+
+    private val _isSongsLoading = MutableStateFlow(false)
+    val isSongsLoading: StateFlow<Boolean> = _isSongsLoading.asStateFlow()
+
+    private val _isRadioLoading = MutableStateFlow(false)
+    val isRadioLoading: StateFlow<Boolean> = _isRadioLoading.asStateFlow()
+
+    private val _songsError = MutableStateFlow<String?>(null)
+    val songsError: StateFlow<String?> = _songsError.asStateFlow()
+
+    private val _radioError = MutableStateFlow<String?>(null)
+    val radioError: StateFlow<String?> = _radioError.asStateFlow()
+
+    private var onlineInitialized = false
+    private var onlineSearchJob: Job? = null
+    private var radioLoadJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -206,6 +242,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleShuffle() = playerEngine.toggleShuffle()
     fun cycleRepeatMode() = playerEngine.cycleRepeatMode()
     fun toggleGaplessMode() = playerEngine.toggleGaplessMode()
+    fun setCrossfadeDuration(seconds: Int) = playerEngine.setCrossfadeDuration(seconds)
 
     fun setEqEnabled(enabled: Boolean) = playerEngine.setEqEnabled(enabled)
     fun toggleSimulateAux() = playerEngine.toggleSimulateAux()
@@ -285,6 +322,68 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun getTracksForPlaylist(playlistId: Long) = repository.getTracksForPlaylist(playlistId)
+
+    fun clearPlaybackError() = playerEngine.clearPlaybackError()
+
+    fun ensureOnlineInitialized() {
+        if (onlineInitialized) return
+        onlineInitialized = true
+        searchOnlineSongs(_onlineSearchQuery.value)
+        selectRadioCategory(_selectedRadioCategory.value)
+    }
+
+    fun searchOnlineSongs(query: String) {
+        val cleanQuery = query.trim().ifEmpty { "Punjabi Hits" }
+        _onlineSearchQuery.value = cleanQuery
+        onlineSearchJob?.cancel()
+        onlineSearchJob = viewModelScope.launch {
+            _isSongsLoading.value = true
+            _songsError.value = null
+            val result = onlineRepository.searchITunesSongs(cleanQuery)
+            _isSongsLoading.value = false
+            result.onSuccess { list ->
+                _onlineSongs.value = list
+            }.onFailure { err ->
+                _songsError.value = err.message ?: "Unable to fetch songs. Check internet connection."
+            }
+        }
+    }
+
+    fun selectRadioCategory(category: RadioCategory) {
+        _selectedRadioCategory.value = category
+        radioLoadJob?.cancel()
+        radioLoadJob = viewModelScope.launch {
+            _isRadioLoading.value = true
+            _radioError.value = null
+            val result = onlineRepository.fetchRadioStations(category)
+            _isRadioLoading.value = false
+            result.onSuccess { stations ->
+                _radioStations.value = stations
+            }.onFailure { err ->
+                _radioError.value = err.message ?: "Unable to load live radio stations."
+            }
+        }
+    }
+
+    fun searchOnlineRadio(query: String) {
+        val clean = query.trim()
+        if (clean.isEmpty()) {
+            selectRadioCategory(_selectedRadioCategory.value)
+            return
+        }
+        radioLoadJob?.cancel()
+        radioLoadJob = viewModelScope.launch {
+            _isRadioLoading.value = true
+            _radioError.value = null
+            val result = onlineRepository.fetchRadioStations(RadioCategory.SEARCH, clean)
+            _isRadioLoading.value = false
+            result.onSuccess { stations ->
+                _radioStations.value = stations
+            }.onFailure { err ->
+                _radioError.value = err.message ?: "Unable to search radio stations."
+            }
+        }
+    }
 
     fun scanDeviceAudioFiles() {
         viewModelScope.launch {

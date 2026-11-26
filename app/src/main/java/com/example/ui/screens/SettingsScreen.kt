@@ -30,8 +30,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -55,13 +58,16 @@ import com.example.ui.theme.CyberTextPrimary
 import com.example.ui.theme.CyberTextSecondary
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Headphones
+import com.example.BuildConfig
 import com.example.ui.theme.EqNeonGreen
 import com.example.ui.theme.FlacBadgeGreen
 
 @Composable
 fun SettingsScreen(
     isGaplessEnabled: Boolean,
+    crossfadeDurationSec: Int = 7,
     onToggleGapless: () -> Unit,
+    onCrossfadeDurationChange: (Int) -> Unit = {},
     onScanStorageClick: () -> Unit,
     isAuxSimulated: Boolean = false,
     isExternalAudioConnected: Boolean = false,
@@ -153,6 +159,70 @@ fun SettingsScreen(
                         ),
                         modifier = Modifier.testTag("gapless_setting_switch")
                     )
+                }
+
+                AnimatedVisibility(visible = isGaplessEnabled) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Crossfade Duration",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = CyberTextPrimary
+                                )
+                            )
+                            Text(
+                                text = if (crossfadeDurationSec == 0) "0s (Pure Gapless)" else "${crossfadeDurationSec}s",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberNeonCyan
+                                )
+                            )
+                        }
+
+                        Slider(
+                            value = crossfadeDurationSec.toFloat(),
+                            onValueChange = { onCrossfadeDurationChange(kotlin.math.round(it).toInt()) },
+                            valueRange = 0f..12f,
+                            steps = 11,
+                            colors = SliderDefaults.colors(
+                                thumbColor = CyberElectricPurple,
+                                activeTrackColor = CyberElectricPurple,
+                                inactiveTrackColor = CyberSurfaceVariant,
+                                activeTickColor = CyberNeonCyan,
+                                inactiveTickColor = CyberTextMuted
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("crossfade_duration_slider")
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "0s",
+                                style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
+                            )
+                            Text(
+                                text = "Default: 7s end / 4s skip",
+                                style = MaterialTheme.typography.labelSmall.copy(color = CyberTextSecondary)
+                            )
+                            Text(
+                                text = "12s",
+                                style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -465,7 +535,7 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "HARMANX Music Player • High-Res Offline Audio Engine",
+                    text = "HARMANX Music Player • v${BuildConfig.VERSION_NAME} • Hi-Res & Online Engine",
                     style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
                 )
             }

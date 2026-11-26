@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Track
+import com.example.data.network.isLiveRadio
 import com.example.ui.theme.CyberNeonCyan
 import com.example.ui.theme.CyberSurfaceVariant
 import com.example.ui.theme.CyberTextPrimary
@@ -57,6 +58,7 @@ import kotlin.math.abs
 fun MiniPlayer(
     currentTrack: Track?,
     isPlaying: Boolean,
+    isBuffering: Boolean = false,
     currentPositionMs: Long,
     durationMs: Long,
     onPlayPauseClick: () -> Unit,
@@ -67,7 +69,8 @@ fun MiniPlayer(
 ) {
     if (currentTrack == null) return
 
-    val progress = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+    val isLive = currentTrack.isLiveRadio
+    val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     val offsetX = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -139,14 +142,24 @@ fun MiniPlayer(
 
             Column {
                 // Live Progress Bar Line
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.5.dp),
-                    color = CyberNeonCyan,
-                    trackColor = Color.White.copy(alpha = 0.1f)
-                )
+                if (isBuffering || (isLive && isPlaying)) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.5.dp),
+                        color = if (isLive) DarkRedPrimary else CyberNeonCyan,
+                        trackColor = Color.White.copy(alpha = 0.1f)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.5.dp),
+                        color = CyberNeonCyan,
+                        trackColor = Color.White.copy(alpha = 0.1f)
+                    )
+                }
 
                 Row(
                     modifier = Modifier

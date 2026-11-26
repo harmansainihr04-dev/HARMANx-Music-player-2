@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -32,6 +33,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +52,7 @@ import com.example.ui.components.FullPlayerModal
 import com.example.ui.components.MiniPlayer
 import com.example.ui.screens.EqualizerScreen
 import com.example.ui.screens.LibraryScreen
+import com.example.ui.screens.OnlineScreen
 import com.example.ui.screens.PlaylistsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.AuraTheme
@@ -62,7 +65,7 @@ import com.example.ui.theme.CyberTextSecondary
 import com.example.ui.viewmodel.MusicViewModel
 
 enum class NavTab {
-    LIBRARY, PLAYLISTS, EQUALIZER, SETTINGS
+    LIBRARY, ONLINE, PLAYLISTS, EQUALIZER, SETTINGS
 }
 
 class MainActivity : ComponentActivity() {
@@ -175,11 +178,14 @@ fun AuraMusicApp(
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val currentTrack by viewModel.currentTrack.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
+    val isBuffering by viewModel.isBuffering.collectAsStateWithLifecycle()
+    val playbackError by viewModel.playbackError.collectAsStateWithLifecycle()
     val currentPositionMs by viewModel.currentPositionMs.collectAsStateWithLifecycle()
     val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
     val isShuffle by viewModel.isShuffle.collectAsStateWithLifecycle()
     val repeatMode by viewModel.repeatMode.collectAsStateWithLifecycle()
     val isGaplessEnabled by viewModel.isGaplessEnabled.collectAsStateWithLifecycle()
+    val crossfadeDurationSec by viewModel.crossfadeDurationSec.collectAsStateWithLifecycle()
 
     val isExternalAudioConnected by viewModel.isExternalAudioConnected.collectAsStateWithLifecycle()
     val isAuxSimulated by viewModel.isAuxSimulated.collectAsStateWithLifecycle()
@@ -200,6 +206,22 @@ fun AuraMusicApp(
     val selectedFilter by viewModel.selectedFilter.collectAsStateWithLifecycle()
     val isScanInProgress by viewModel.isScanInProgress.collectAsStateWithLifecycle()
     val lastScanMessage by viewModel.lastScanMessage.collectAsStateWithLifecycle()
+
+    val onlineSongs by viewModel.onlineSongs.collectAsStateWithLifecycle()
+    val radioStations by viewModel.radioStations.collectAsStateWithLifecycle()
+    val onlineSearchQuery by viewModel.onlineSearchQuery.collectAsStateWithLifecycle()
+    val selectedRadioCategory by viewModel.selectedRadioCategory.collectAsStateWithLifecycle()
+    val isSongsLoading by viewModel.isSongsLoading.collectAsStateWithLifecycle()
+    val isRadioLoading by viewModel.isRadioLoading.collectAsStateWithLifecycle()
+    val songsError by viewModel.songsError.collectAsStateWithLifecycle()
+    val radioError by viewModel.radioError.collectAsStateWithLifecycle()
+
+    LaunchedEffect(playbackError) {
+        playbackError?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            viewModel.clearPlaybackError()
+        }
+    }
 
     // Step-by-step back press navigation handling
     BackHandler(enabled = isFullPlayerVisible) {
@@ -229,6 +251,7 @@ fun AuraMusicApp(
                     MiniPlayer(
                         currentTrack = currentTrack,
                         isPlaying = isPlaying,
+                        isBuffering = isBuffering,
                         currentPositionMs = currentPositionMs,
                         durationMs = durationMs,
                         onPlayPauseClick = { viewModel.togglePlayPause() },
@@ -250,7 +273,7 @@ fun AuraMusicApp(
                             isFullPlayerVisible = false
                         },
                         icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
-                        label = { Text("Library", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("Library", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = CyberNeonCyan,
                             selectedTextColor = CyberNeonCyan,
@@ -262,13 +285,31 @@ fun AuraMusicApp(
                     )
 
                     NavigationBarItem(
+                        selected = selectedTab == NavTab.ONLINE && !isFullPlayerVisible,
+                        onClick = {
+                            selectedTab = NavTab.ONLINE
+                            isFullPlayerVisible = false
+                        },
+                        icon = { Icon(Icons.Default.Public, contentDescription = "Online Music") },
+                        label = { Text("Online", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = CyberNeonCyan,
+                            selectedTextColor = CyberNeonCyan,
+                            indicatorColor = CyberNeonCyan.copy(alpha = 0.15f),
+                            unselectedIconColor = CyberTextMuted,
+                            unselectedTextColor = CyberTextMuted
+                        ),
+                        modifier = Modifier.testTag("nav_tab_online")
+                    )
+
+                    NavigationBarItem(
                         selected = selectedTab == NavTab.PLAYLISTS && !isFullPlayerVisible,
                         onClick = {
                             selectedTab = NavTab.PLAYLISTS
                             isFullPlayerVisible = false
                         },
                         icon = { Icon(Icons.Default.PlaylistPlay, contentDescription = "Playlists") },
-                        label = { Text("Playlists", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("Playlists", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = CyberNeonCyan,
                             selectedTextColor = CyberNeonCyan,
@@ -286,7 +327,7 @@ fun AuraMusicApp(
                             isFullPlayerVisible = false
                         },
                         icon = { Icon(Icons.Default.Equalizer, contentDescription = "Equalizer") },
-                        label = { Text("Equalizer", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("Equalizer", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = CyberNeonCyan,
                             selectedTextColor = CyberNeonCyan,
@@ -304,7 +345,7 @@ fun AuraMusicApp(
                             isFullPlayerVisible = false
                         },
                         icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                        label = { Text("Settings", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        label = { Text("Settings", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = CyberNeonCyan,
                             selectedTextColor = CyberNeonCyan,
@@ -352,6 +393,33 @@ fun AuraMusicApp(
                     onAddNewTrack = { title, artist, album, isFlac ->
                         viewModel.addNewTrack(title, artist, album, isFlac)
                     },
+                    onPlayNext = { track ->
+                        viewModel.addToPlayNext(track)
+                        Toast.makeText(context, "${track.title} will play next", Toast.LENGTH_SHORT).show()
+                    },
+                    onAddToQueue = { track ->
+                        viewModel.addToQueue(track)
+                        Toast.makeText(context, "Added to queue: ${track.title}", Toast.LENGTH_SHORT).show()
+                    }
+                )
+
+                NavTab.ONLINE -> OnlineScreen(
+                    onlineSongs = onlineSongs,
+                    radioStations = radioStations,
+                    currentPlayingTrack = currentTrack,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    isSongsLoading = isSongsLoading,
+                    isRadioLoading = isRadioLoading,
+                    songsError = songsError,
+                    radioError = radioError,
+                    activeQuery = onlineSearchQuery,
+                    selectedRadioCategory = selectedRadioCategory,
+                    onInitialize = { viewModel.ensureOnlineInitialized() },
+                    onSearchSongs = { query -> viewModel.searchOnlineSongs(query) },
+                    onSelectRadioCategory = { cat -> viewModel.selectRadioCategory(cat) },
+                    onSearchRadio = { query -> viewModel.searchOnlineRadio(query) },
+                    onPlayTrackFromList = { list, idx -> viewModel.playTrackList(list, idx) },
                     onPlayNext = { track ->
                         viewModel.addToPlayNext(track)
                         Toast.makeText(context, "${track.title} will play next", Toast.LENGTH_SHORT).show()
@@ -414,7 +482,9 @@ fun AuraMusicApp(
 
                 NavTab.SETTINGS -> SettingsScreen(
                     isGaplessEnabled = isGaplessEnabled,
+                    crossfadeDurationSec = crossfadeDurationSec,
                     onToggleGapless = { viewModel.toggleGaplessMode() },
+                    onCrossfadeDurationChange = { viewModel.setCrossfadeDuration(it) },
                     onScanStorageClick = { viewModel.scanDeviceAudioFiles() },
                     isAuxSimulated = isAuxSimulated,
                     isExternalAudioConnected = isExternalAudioConnected,
@@ -427,6 +497,7 @@ fun AuraMusicApp(
                 isVisible = isFullPlayerVisible,
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
+                isBuffering = isBuffering,
                 currentPositionMs = currentPositionMs,
                 durationMs = durationMs,
                 isShuffle = isShuffle,
