@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.example.data.model.Track
 import com.example.data.network.OnlineArtworkCache
@@ -39,13 +40,14 @@ fun TrackArtworkThumbnail(
     track: Track,
     modifier: Modifier = Modifier,
     iconSize: Dp = 24.dp,
-    shape: Shape = RoundedCornerShape(10.dp)
+    shape: Shape = RoundedCornerShape(10.dp),
+    targetSizePx: Int = 128,
+    enableCrossfade: Boolean = false
 ) {
     val context = LocalContext.current
     val remoteArtUrl = remember(track.audioPath) { OnlineArtworkCache.get(track.audioPath) }
     var isImageLoadFailed by remember(track.id, track.albumId, track.audioPath, remoteArtUrl) { mutableStateOf(false) }
 
-    // Build actual artwork URI from online URL first, then MediaStore album art if available
     val artworkData: Any? = remember(track.id, track.albumId, remoteArtUrl) {
         when {
             !remoteArtUrl.isNullOrBlank() -> remoteArtUrl
@@ -77,7 +79,10 @@ fun TrackArtworkThumbnail(
             AsyncImage(
                 model = ImageRequest.Builder(context)
                     .data(artworkData)
-                    .crossfade(true)
+                    .size(targetSizePx)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .crossfade(enableCrossfade)
                     .build(),
                 contentDescription = "Song Thumbnail",
                 contentScale = ContentScale.Crop,
@@ -91,7 +96,6 @@ fun TrackArtworkThumbnail(
             )
         }
 
-        // Show fallback icon if no image URI or image load fails
         if (artworkData == null || isImageLoadFailed) {
             Icon(
                 imageVector = if (track.isLiveRadio) Icons.Default.Radio else Icons.Default.MusicNote,

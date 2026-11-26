@@ -1,16 +1,13 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -20,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.CyberElectricPurple
 import com.example.ui.theme.CyberNeonCyan
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.sin
 
 @Composable
@@ -28,16 +27,26 @@ fun VisualizerCanvas(
     bassBoostLevel: Float,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "visualizer_anim")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 2f * Math.PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "phase"
-    )
+    var phase by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        val twoPi = (2.0 * Math.PI).toFloat()
+        while (isActive) {
+            delay(33L) // Smooth ~30fps spectrum update with zero battery burn when paused
+            phase = (phase + 0.17f) % twoPi
+        }
+    }
+
+    val gradient = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                CyberNeonCyan.copy(alpha = 0.30f),
+                CyberElectricPurple.copy(alpha = 0.30f),
+                Color(0xFFFF3D00).copy(alpha = 0.30f)
+            )
+        )
+    }
 
     Canvas(
         modifier = modifier.fillMaxWidth()
@@ -48,17 +57,8 @@ fun VisualizerCanvas(
         val gap = (totalWidth / barCount) * 0.35f
         val maxHeight = size.height
 
-        val gradient = Brush.verticalGradient(
-            colors = listOf(
-                CyberNeonCyan.copy(alpha = 0.30f),
-                CyberElectricPurple.copy(alpha = 0.30f),
-                Color(0xFFFF3D00).copy(alpha = 0.30f)
-            )
-        )
-
         for (i in 0 until barCount) {
             val normalizedIndex = i.toFloat() / barCount
-            // Simulate frequency spectrum height
             val bassFactor = if (i < 8) (1f + bassBoostLevel * 1.5f) else 1f
             val waveHeight = if (isPlaying) {
                 val sinValue = sin(phase + i * 0.35f)

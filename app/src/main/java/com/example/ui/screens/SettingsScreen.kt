@@ -21,11 +21,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -68,6 +73,10 @@ fun SettingsScreen(
     crossfadeDurationSec: Int = 7,
     onToggleGapless: () -> Unit,
     onCrossfadeDurationChange: (Int) -> Unit = {},
+    sleepTimerRemainingSec: Int? = null,
+    onSetSleepTimer: (Int) -> Unit = {},
+    cacheSizeBytes: Long = 0L,
+    onClearCache: () -> Unit = {},
     onScanStorageClick: () -> Unit,
     isAuxSimulated: Boolean = false,
     isExternalAudioConnected: Boolean = false,
@@ -228,6 +237,154 @@ fun SettingsScreen(
         }
 
 
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Sleep Timer Card (Smooth Volume Fade-Out)
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp)),
+            colors = CardDefaults.cardColors(containerColor = CyberSurfaceDark)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Bedtime,
+                            contentDescription = null,
+                            tint = CyberNeonCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Sleep Timer",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberTextPrimary
+                                )
+                            )
+                            Text(
+                                text = if (sleepTimerRemainingSec != null) {
+                                    val mins = sleepTimerRemainingSec / 60
+                                    val secs = sleepTimerRemainingSec % 60
+                                    "Fading out & pausing in ${mins}m ${secs.toString().padStart(2, '0')}s"
+                                } else {
+                                    "Auto fade-out & pause music after set time"
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = if (sleepTimerRemainingSec != null) CyberNeonCyan else CyberTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val timerOptions = listOf(0 to "Off", 15 to "15m", 30 to "30m", 45 to "45m", 60 to "60m")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    timerOptions.forEach { (minutes, label) ->
+                        val isSelected = if (minutes == 0) sleepTimerRemainingSec == null
+                        else sleepTimerRemainingSec != null && ((sleepTimerRemainingSec + 59) / 60) in (minutes - 14)..minutes
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { onSetSleepTimer(minutes) },
+                            label = {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = CyberNeonCyan.copy(alpha = 0.2f),
+                                selectedLabelColor = CyberNeonCyan,
+                                containerColor = CyberSurfaceVariant,
+                                labelColor = CyberTextSecondary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Online Data Saver & Preload Cache Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp)),
+            colors = CardDefaults.cardColors(containerColor = CyberSurfaceDark)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CleaningServices,
+                            contentDescription = null,
+                            tint = CyberElectricPurple,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Preload & Artwork Cache",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberTextPrimary
+                                )
+                            )
+                            val sizeLabel = if (cacheSizeBytes < 1024L * 1024L) {
+                                "${(cacheSizeBytes / 1024L).coerceAtLeast(0L)} KB"
+                            } else {
+                                String.format("%.1f MB", cacheSizeBytes / (1024.0 * 1024.0))
+                            }
+                            Text(
+                                text = "Low-data 100p art + next-song preload • Used: $sizeLabel",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = CyberTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = onClearCache,
+                        modifier = Modifier.testTag("clear_cache_button")
+                    ) {
+                        Text("Clear", color = CyberNeonCyan, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

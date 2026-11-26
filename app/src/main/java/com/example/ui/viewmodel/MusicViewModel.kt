@@ -72,6 +72,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val repeatMode = playerEngine.repeatMode
     val isGaplessEnabled = playerEngine.isGaplessEnabled
     val crossfadeDurationSec = playerEngine.crossfadeDurationSec
+    val sleepTimerRemainingSec = playerEngine.sleepTimerRemainingSec
 
     // Equalizer & Spatial Audio state forwards
     val isExternalAudioConnected = playerEngine.isExternalAudioConnected
@@ -121,7 +122,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _radioError = MutableStateFlow<String?>(null)
     val radioError: StateFlow<String?> = _radioError.asStateFlow()
 
+    private val _cacheSizeBytes = MutableStateFlow(0L)
+    val cacheSizeBytes: StateFlow<Long> = _cacheSizeBytes.asStateFlow()
+
     private var onlineInitialized = false
+    private var radioInitialized = false
     private var onlineSearchJob: Job? = null
     private var radioLoadJob: Job? = null
 
@@ -129,6 +134,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.initializePreloadedData()
         }
+        refreshCacheSize()
     }
 
     fun playTrackList(tracks: List<Track>, startIndex: Int = 0) {
@@ -173,61 +179,67 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val context = getApplication<Application>()
-                var title = "External Audio"
-                var artist = "Unknown Artist"
-                var album = "Audio File"
-                var durationMs = 0L
-                var isFlac = false
+                val externalTrack = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    var title = "External Audio"
+                    var artist = "Unknown Artist"
+                    var album = "Audio File"
+                    var durationMs = 0L
+                    var isFlac = false
 
-                // Try to resolve filename from ContentResolver
-                try {
-                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1 && cursor.moveToFirst()) {
-                            val displayName = cursor.getString(nameIndex)
-                            if (!displayName.isNullOrBlank()) {
-                                title = displayName.substringBeforeLast(".")
-                                if (displayName.endsWith(".flac", ignoreCase = true)) {
-                                    isFlac = true
+                    try {
+                        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1 && cursor.moveToFirst()) {
+                                val displayName = cursor.getString(nameIndex)
+                                if (!displayName.isNullOrBlank()) {
+                                    title = displayName.substringBeforeLast(".")
+                                    if (displayName.endsWith(".flac", ignoreCase = true)) {
+                                        isFlac = true
+                                    }
                                 }
                             }
                         }
-                    }
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {}
 
-                try {
-                    val retriever = android.media.MediaMetadataRetriever()
-                    retriever.setDataSource(context, uri)
-                    val metaTitle = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
-                    val metaArtist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
-                    val metaAlbum = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
-                    val metaDuration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                    try {
+                        val retriever = android.media.MediaMetadataRetriever()
+                        try {
+                            retriever.setDataSource(context, uri)
+                            val metaTitle = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
+                            val metaArtist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                            val metaAlbum = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                            val metaDuration = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                            val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
 
-                    if (!metaTitle.isNullOrBlank()) title = metaTitle
-                    if (!metaArtist.isNullOrBlank()) artist = metaArtist
-                    if (!metaAlbum.isNullOrBlank()) album = metaAlbum
-                    durationMs = metaDuration?.toLongOrNull() ?: 180000L
-                    if (mime?.contains("flac", ignoreCase = true) == true) {
-                        isFlac = true
-                    }
-                    retriever.release()
-                } catch (_: Exception) {}
+                            if (!metaTitle.isNullOrBlank()) title = metaTitle
+                            if (!metaArtist.isNullOrBlank()) artist = metaArtist
+                            if (!metaAlbum.isNullOrBlank()) album = metaAlbum
+                            durationMs = metaDuration?.toLongOrNull() ?: 180000L
+                            if (mime?.contains("flac", ignoreCase = true) == true) {
+                                isFlac = true
+                            }
+                        } finally {
+                            try {
+                                retriever.release()
+                            } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
 
-                val externalTrack = Track(
-                    id = System.currentTimeMillis(),
-                    title = title,
-                    artist = artist,
-                    album = album,
-                    durationMs = if (durationMs > 0) durationMs else 180000L,
-                    audioPath = uri.toString(),
-                    isFlac = isFlac,
-                    sampleRate = if (isFlac) "24-bit / 96.0 kHz" else "16-bit / 44.1 kHz",
-                    bitrate = if (isFlac) "2830 kbps" else "320 kbps",
-                    fileSizeBytes = 25_000_000,
-                    isFavorite = false,
-                    artworkColorIndex = (0..5).random()
-                )
+                    Track(
+                        id = System.currentTimeMillis(),
+                        title = title,
+                        artist = artist,
+                        album = album,
+                        durationMs = if (durationMs > 0) durationMs else 180000L,
+                        audioPath = uri.toString(),
+                        isFlac = isFlac,
+                        sampleRate = if (isFlac) "24-bit / 96.0 kHz" else "16-bit / 44.1 kHz",
+                        bitrate = if (isFlac) "2830 kbps" else "320 kbps",
+                        fileSizeBytes = 25_000_000,
+                        isFavorite = false,
+                        artworkColorIndex = (0..5).random()
+                    )
+                }
                 playerEngine.setQueue(listOf(externalTrack), 0)
             } catch (e: Exception) {
                 android.util.Log.e("MusicViewModel", "Error opening URI", e)
@@ -243,6 +255,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun cycleRepeatMode() = playerEngine.cycleRepeatMode()
     fun toggleGaplessMode() = playerEngine.toggleGaplessMode()
     fun setCrossfadeDuration(seconds: Int) = playerEngine.setCrossfadeDuration(seconds)
+    fun setSleepTimer(minutes: Int) = playerEngine.setSleepTimer(minutes)
+    fun cancelSleepTimer() = playerEngine.cancelSleepTimer()
+
+    fun refreshCacheSize() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _cacheSizeBytes.value = com.example.data.network.OnlineTrackPreloader.getTotalCacheSizeBytes(getApplication())
+        }
+    }
+
+    fun clearAppCaches() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.example.data.network.OnlineTrackPreloader.clearAllCaches(getApplication())
+            _cacheSizeBytes.value = 0L
+        }
+    }
 
     fun setEqEnabled(enabled: Boolean) = playerEngine.setEqEnabled(enabled)
     fun toggleSimulateAux() = playerEngine.toggleSimulateAux()
@@ -329,17 +356,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (onlineInitialized) return
         onlineInitialized = true
         searchOnlineSongs(_onlineSearchQuery.value)
+    }
+
+    fun ensureRadioInitialized() {
+        if (radioInitialized) return
+        radioInitialized = true
         selectRadioCategory(_selectedRadioCategory.value)
     }
 
-    fun searchOnlineSongs(query: String) {
+    fun searchOnlineSongs(query: String, forceRefresh: Boolean = false) {
         val cleanQuery = query.trim().ifEmpty { "Punjabi Hits" }
         _onlineSearchQuery.value = cleanQuery
         onlineSearchJob?.cancel()
         onlineSearchJob = viewModelScope.launch {
             _isSongsLoading.value = true
             _songsError.value = null
-            val result = onlineRepository.searchITunesSongs(cleanQuery)
+            val result = onlineRepository.searchITunesSongs(cleanQuery, forceRefresh = forceRefresh)
             _isSongsLoading.value = false
             result.onSuccess { list ->
                 _onlineSongs.value = list
@@ -349,13 +381,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectRadioCategory(category: RadioCategory) {
+    fun selectRadioCategory(category: RadioCategory, forceRefresh: Boolean = false) {
+        radioInitialized = true
         _selectedRadioCategory.value = category
         radioLoadJob?.cancel()
         radioLoadJob = viewModelScope.launch {
             _isRadioLoading.value = true
             _radioError.value = null
-            val result = onlineRepository.fetchRadioStations(category)
+            val result = onlineRepository.fetchRadioStations(category, forceRefresh = forceRefresh)
             _isRadioLoading.value = false
             result.onSuccess { stations ->
                 _radioStations.value = stations
@@ -365,17 +398,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun searchOnlineRadio(query: String) {
+    fun searchOnlineRadio(query: String, forceRefresh: Boolean = false) {
         val clean = query.trim()
         if (clean.isEmpty()) {
-            selectRadioCategory(_selectedRadioCategory.value)
+            selectRadioCategory(_selectedRadioCategory.value, forceRefresh = forceRefresh)
             return
         }
+        radioInitialized = true
         radioLoadJob?.cancel()
         radioLoadJob = viewModelScope.launch {
             _isRadioLoading.value = true
             _radioError.value = null
-            val result = onlineRepository.fetchRadioStations(RadioCategory.SEARCH, clean)
+            val result = onlineRepository.fetchRadioStations(RadioCategory.SEARCH, clean, forceRefresh = forceRefresh)
             _isRadioLoading.value = false
             result.onSuccess { stations ->
                 _radioStations.value = stations

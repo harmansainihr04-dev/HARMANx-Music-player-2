@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
@@ -24,9 +25,20 @@ class OnlineMusicRepository {
 
     private val moshi = Moshi.Builder().build()
 
-    private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+    private val iTunesOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", "HARMANX/${BuildConfig.VERSION_NAME} (Android)")
+                .build()
+            chain.proceed(request)
+        }
+        .build()
+
+    private val radioOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("User-Agent", "HARMANX/${BuildConfig.VERSION_NAME} (Android)")
@@ -37,7 +49,7 @@ class OnlineMusicRepository {
 
     private val iTunesApi: ITunesSearchApi = Retrofit.Builder()
         .baseUrl("https://itunes.apple.com/")
-        .client(okHttpClient)
+        .client(iTunesOkHttpClient)
         .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
         .create(ITunesSearchApi::class.java)
@@ -48,10 +60,16 @@ class OnlineMusicRepository {
         "https://at1.api.radio-browser.info/"
     )
 
+    @Volatile
+    private var preferredRadioMirror: String? = null
+
+    private val songCache = ConcurrentHashMap<String, List<Track>>()
+    private val radioCache = ConcurrentHashMap<String, List<Track>>()
+
     private fun createRadioApi(baseUrl: String): RadioBrowserApi {
         return Retrofit.Builder()
             .baseUrl(baseUrl)
-            .client(okHttpClient)
+            .client(radioOkHttpClient)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(RadioBrowserApi::class.java)
@@ -59,14 +77,22 @@ class OnlineMusicRepository {
 
     suspend fun searchITunesSongs(
         query: String,
-        country: String = "IN"
+        country: String = "IN",
+        forceRefresh: Boolean = false
     ): Result<List<Track>> = withContext(Dispatchers.IO) {
+        val cleanQuery = query.trim().ifEmpty { "punjabi hits" }
+        val cacheKey = "${country}_${cleanQuery.lowercase()}"
+        if (!forceRefresh) {
+            songCache[cacheKey]?.let { cached ->
+                if (cached.isNotEmpty()) return@withContext Result.success(cached)
+            }
+        }
+
         try {
-            val cleanQuery = query.trim().ifEmpty { "punjabi hits" }
             val response = iTunesApi.searchSongs(
                 term = cleanQuery,
                 country = country,
-                limit = 35
+                limit = 25
             )
             val tracks = response.results.mapIndexedNotNull { idx, dto ->
                 val preview = dto.previewUrl?.takeIf {
@@ -74,10 +100,10 @@ class OnlineMusicRepository {
                 } ?: return@mapIndexedNotNull null
                 val title = dto.trackName?.takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
                 val artist = dto.artistName?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-                val highResArt = (dto.artworkUrl100 ?: dto.artworkUrl60)
-                    ?.replace("100x100bb", "600x600bb")
-                    ?.replace("60x60bb", "600x600bb")
-                OnlineArtworkCache.put(preview, highResArt)
+                // Low-data fast-loading 100x100 artwork (~3-6 KB vs 40 KB)
+                val lightArt = (dto.artworkUrl100 ?: dto.artworkUrl60)
+                    ?.replace("60x60bb", "100x100bb")
+                OnlineArtworkCache.put(preview, lightArt)
 
                 val safeId = if (dto.trackId > 0L) -dto.trackId else -(100_000L + idx)
                 Track(
@@ -95,6 +121,9 @@ class OnlineMusicRepository {
                     artworkColorIndex = abs(safeId.toInt()) % 5
                 )
             }
+            if (tracks.isNotEmpty()) {
+                songCache[cacheKey] = tracks
+            }
             Result.success(tracks)
         } catch (e: Exception) {
             Result.failure(e)
@@ -103,40 +132,50 @@ class OnlineMusicRepository {
 
     suspend fun fetchRadioStations(
         category: RadioCategory,
-        customQuery: String = ""
+        customQuery: String = "",
+        forceRefresh: Boolean = false
     ): Result<List<Track>> = withContext(Dispatchers.IO) {
+        val cacheKey = "${category.name}_${customQuery.trim().lowercase()}"
+        if (!forceRefresh) {
+            radioCache[cacheKey]?.let { cached ->
+                if (cached.isNotEmpty()) return@withContext Result.success(cached)
+            }
+        }
+
+        val orderedMirrors = preferredRadioMirror?.let { fav ->
+            listOf(fav) + radioMirrors.filter { it != fav }
+        } ?: radioMirrors
+
         var lastError: Exception? = null
-        for (mirror in radioMirrors) {
+        for (mirror in orderedMirrors) {
             try {
                 val api = createRadioApi(mirror)
                 val rawStations = when (category) {
                     RadioCategory.PUNJABI -> coroutineScope {
-                        val byTag = async { api.searchStations(tag = "punjabi", limit = 30) }
-                        val byName = async { api.searchStations(name = "punjabi", limit = 30) }
-                        val byBhangra = async { api.searchStations(tag = "bhangra", limit = 15) }
-                        byTag.await() + byName.await() + byBhangra.await()
+                        val byTag = async { api.searchStations(tag = "punjabi", limit = 20) }
+                        val byName = async { api.searchStations(name = "punjabi", limit = 20) }
+                        byTag.await() + byName.await()
                     }
                     RadioCategory.HARYANVI -> coroutineScope {
-                        val byName = async { api.searchStations(name = "haryanvi", limit = 25) }
-                        val byTag = async { api.searchStations(tag = "haryanvi", limit = 25) }
-                        val byHaryana = async { api.searchStations(name = "haryana", limit = 20) }
-                        val byDesi = async { api.searchStations(name = "desi", countryCode = "IN", limit = 20) }
-                        val combined = byName.await() + byTag.await() + byHaryana.await() + byDesi.await()
+                        val byName = async { api.searchStations(name = "haryanvi", limit = 20) }
+                        val byTag = async { api.searchStations(tag = "haryanvi", limit = 15) }
+                        val byHaryana = async { api.searchStations(name = "haryana", limit = 15) }
+                        val combined = byName.await() + byTag.await() + byHaryana.await()
                         if (combined.isNotEmpty()) {
                             combined
                         } else {
-                            api.searchStations(tag = "hindi", countryCode = "IN", limit = 25)
+                            api.searchStations(tag = "hindi", countryCode = "IN", limit = 20)
                         }
                     }
                     RadioCategory.HINDI_BOLLYWOOD -> coroutineScope {
-                        val byTag = async { api.searchStations(tag = "bollywood", limit = 25) }
-                        val byHindi = async { api.searchStations(tag = "hindi", countryCode = "IN", limit = 25) }
+                        val byTag = async { api.searchStations(tag = "bollywood", limit = 20) }
+                        val byHindi = async { api.searchStations(tag = "hindi", countryCode = "IN", limit = 20) }
                         byTag.await() + byHindi.await()
                     }
                     RadioCategory.SEARCH -> coroutineScope {
                         val q = customQuery.trim().ifEmpty { "punjabi" }
-                        val byName = async { api.searchStations(name = q, limit = 25) }
-                        val byTag = async { api.searchStations(tag = q.lowercase(), limit = 25) }
+                        val byName = async { api.searchStations(name = q, limit = 20) }
+                        val byTag = async { api.searchStations(tag = q.lowercase(), limit = 20) }
                         byName.await() + byTag.await()
                     }
                 }
@@ -153,6 +192,9 @@ class OnlineMusicRepository {
                     .sortedWith(
                         compareByDescending<RadioStationDto> {
                             (it.urlResolved ?: it.url).startsWith("https://")
+                        }.thenByDescending {
+                            val br = it.bitrate ?: 0
+                            br in 48..128
                         }.thenByDescending {
                             (it.votes ?: 0) + (it.clickcount ?: 0)
                         }
@@ -186,7 +228,7 @@ class OnlineMusicRepository {
                             title = dto.name.trim(),
                             artist = region,
                             album = tagsLabel,
-                            durationMs = 0L, // Live radio stream (continuous)
+                            durationMs = 0L,
                             audioPath = streamUrl,
                             isFlac = false,
                             sampleRate = "LIVE RADIO • $codecStr",
@@ -197,6 +239,10 @@ class OnlineMusicRepository {
                         )
                     }
 
+                preferredRadioMirror = mirror
+                if (tracks.isNotEmpty()) {
+                    radioCache[cacheKey] = tracks
+                }
                 return@withContext Result.success(tracks)
             } catch (e: Exception) {
                 lastError = e

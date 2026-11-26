@@ -28,8 +28,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.StateFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,8 +62,8 @@ fun MiniPlayer(
     currentTrack: Track?,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
-    currentPositionMs: Long,
-    durationMs: Long,
+    currentPositionMsFlow: StateFlow<Long>,
+    durationMsFlow: StateFlow<Long>,
     onPlayPauseClick: () -> Unit,
     onNextClick: () -> Unit,
     onPreviousClick: () -> Unit = {},
@@ -70,7 +73,6 @@ fun MiniPlayer(
     if (currentTrack == null) return
 
     val isLive = currentTrack.isLiveRadio
-    val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
     val offsetX = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -141,25 +143,13 @@ fun MiniPlayer(
             )
 
             Column {
-                // Live Progress Bar Line
-                if (isBuffering || (isLive && isPlaying)) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp),
-                        color = if (isLive) DarkRedPrimary else CyberNeonCyan,
-                        trackColor = Color.White.copy(alpha = 0.1f)
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp),
-                        color = CyberNeonCyan,
-                        trackColor = Color.White.copy(alpha = 0.1f)
-                    )
-                }
+                MiniPlayerProgressBar(
+                    isBuffering = isBuffering,
+                    isLive = isLive,
+                    isPlaying = isPlaying,
+                    currentPositionMsFlow = currentPositionMsFlow,
+                    durationMsFlow = durationMsFlow
+                )
 
                 Row(
                     modifier = Modifier
@@ -263,5 +253,36 @@ fun MiniPlayer(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerProgressBar(
+    isBuffering: Boolean,
+    isLive: Boolean,
+    isPlaying: Boolean,
+    currentPositionMsFlow: StateFlow<Long>,
+    durationMsFlow: StateFlow<Long>
+) {
+    if (isBuffering || (isLive && isPlaying)) {
+        LinearProgressIndicator(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.5.dp),
+            color = if (isLive) DarkRedPrimary else CyberNeonCyan,
+            trackColor = Color.White.copy(alpha = 0.1f)
+        )
+    } else {
+        val currentPositionMs by currentPositionMsFlow.collectAsStateWithLifecycle()
+        val durationMs by durationMsFlow.collectAsStateWithLifecycle()
+        val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.5.dp),
+            color = CyberNeonCyan,
+            trackColor = Color.White.copy(alpha = 0.1f)
+        )
     }
 }

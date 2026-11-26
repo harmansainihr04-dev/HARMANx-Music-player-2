@@ -13,6 +13,9 @@ interface TrackDao {
     @Query("SELECT * FROM tracks ORDER BY title ASC")
     fun getAllTracks(): Flow<List<Track>>
 
+    @Query("SELECT * FROM tracks")
+    suspend fun getAllTracksOnce(): List<Track>
+
     @Query("SELECT * FROM tracks WHERE isFlac = 1 ORDER BY title ASC")
     fun getFlacTracks(): Flow<List<Track>>
 

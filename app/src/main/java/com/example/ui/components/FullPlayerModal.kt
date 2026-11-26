@@ -49,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,10 +64,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.audio.RepeatMode
 import com.example.data.model.Track
 import com.example.data.network.isLiveRadio
 import com.example.data.network.isOnlineStream
+import kotlinx.coroutines.flow.StateFlow
 import com.example.ui.theme.CyberDeepBackground
 import com.example.ui.theme.CyberElectricPurple
 import com.example.ui.theme.CyberNeonCyan
@@ -85,8 +88,8 @@ fun FullPlayerModal(
     currentTrack: Track?,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
-    currentPositionMs: Long,
-    durationMs: Long,
+    currentPositionMsFlow: StateFlow<Long>,
+    durationMsFlow: StateFlow<Long>,
     isShuffle: Boolean,
     repeatMode: RepeatMode,
     isGaplessEnabled: Boolean,
@@ -217,7 +220,8 @@ fun FullPlayerModal(
                     track = currentTrack,
                     modifier = Modifier.fillMaxSize(),
                     iconSize = 84.dp,
-                    shape = RoundedCornerShape(24.dp)
+                    shape = RoundedCornerShape(24.dp),
+                    targetSizePx = 220
                 )
 
                 // Dark atmospheric translucent glass overlay for crisp visualizer contrast
@@ -316,46 +320,13 @@ fun FullPlayerModal(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Seekbar
-            Column(modifier = Modifier.fillMaxWidth()) {
-                val isLive = currentTrack.isLiveRadio
-                val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-
-                Slider(
-                    value = if (isLive) 1f else progress,
-                    enabled = !isLive,
-                    onValueChange = { newProgress ->
-                        if (!isLive) {
-                            onSeekTo((newProgress * durationMs).toLong())
-                        }
-                    },
-                    colors = SliderDefaults.colors(
-                        thumbColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
-                        activeTrackColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
-                        inactiveTrackColor = CyberSurfaceDark
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("full_player_seekbar")
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = if (isLive) "● LIVE BROADCAST" else formatDuration(currentPositionMs),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            color = if (isLive) DarkRedPrimary else CyberTextMuted,
-                            fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal
-                        )
-                    )
-                    Text(
-                        text = if (isLive) "24/7 STREAM" else formatDuration(durationMs),
-                        style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
-                    )
-                }
-            }
+            FullPlayerSeekbarSection(
+                trackId = currentTrack.id,
+                isLive = currentTrack.isLiveRadio,
+                currentPositionMsFlow = currentPositionMsFlow,
+                durationMsFlow = durationMsFlow,
+                onSeekTo = onSeekTo
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -536,4 +507,66 @@ fun FullPlayerModal(
         }
     }
 }
+}
+
+@Composable
+private fun FullPlayerSeekbarSection(
+    trackId: Long,
+    isLive: Boolean,
+    currentPositionMsFlow: StateFlow<Long>,
+    durationMsFlow: StateFlow<Long>,
+    onSeekTo: (Long) -> Unit
+) {
+    val currentPositionMs by currentPositionMsFlow.collectAsStateWithLifecycle()
+    val durationMs by durationMsFlow.collectAsStateWithLifecycle()
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        val progress = if (!isLive && durationMs > 0) (currentPositionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+        var isSeeking by remember(trackId) { mutableStateOf(false) }
+        var dragProgress by remember(trackId) { mutableFloatStateOf(progress) }
+        val displayedProgress = if (isLive) 1f else if (isSeeking) dragProgress else progress
+        val displayedPosMs = if (isSeeking && durationMs > 0) (dragProgress * durationMs).toLong() else currentPositionMs
+
+        Slider(
+            value = displayedProgress,
+            enabled = !isLive,
+            onValueChange = { newProgress ->
+                if (!isLive) {
+                    isSeeking = true
+                    dragProgress = newProgress.coerceIn(0f, 1f)
+                }
+            },
+            onValueChangeFinished = {
+                if (!isLive && isSeeking) {
+                    isSeeking = false
+                    onSeekTo((dragProgress * durationMs).toLong())
+                }
+            },
+            colors = SliderDefaults.colors(
+                thumbColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
+                activeTrackColor = if (isLive) DarkRedPrimary else CyberNeonCyan,
+                inactiveTrackColor = CyberSurfaceDark
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("full_player_seekbar")
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = if (isLive) "● LIVE BROADCAST" else formatDuration(displayedPosMs),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = if (isLive) DarkRedPrimary else CyberTextMuted,
+                    fontWeight = if (isLive) FontWeight.Bold else FontWeight.Normal
+                )
+            )
+            Text(
+                text = if (isLive) "24/7 STREAM" else formatDuration(durationMs),
+                style = MaterialTheme.typography.labelSmall.copy(color = CyberTextMuted)
+            )
+        }
+    }
 }

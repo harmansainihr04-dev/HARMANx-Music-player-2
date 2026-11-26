@@ -32,26 +32,21 @@ class MusicRepository(
         val scanResult = storageScanner.scanAudioFilesWithFolders()
         val scanned = scanResult.allTracks
         if (scanned.isNotEmpty()) {
-            val existingTracks = trackDao.getTrackCount()
-            if (existingTracks == 0) {
-                trackDao.insertAll(scanned)
-            } else {
-                for (track in scanned) {
-                    val existing = trackDao.getTrackByPath(track.audioPath)
-                    if (existing == null) {
-                        trackDao.insertTrack(track)
-                    }
-                }
+            val existingPaths = trackDao.getAllTracksOnce().mapTo(HashSet()) { it.audioPath }
+            val newTracks = scanned.filter { it.audioPath !in existingPaths }
+            if (newTracks.isNotEmpty()) {
+                trackDao.insertAll(newTracks)
             }
+
+            // Build path -> id map once instead of querying Room inside every folder track loop
+            val pathToIdMap = trackDao.getAllTracksOnce().associate { it.audioPath to it.id }
 
             // Automatically detect device music folders and cleanly sync them into Playlists
             val existingPlaylists = playlistDao.getAllPlaylists().firstOrNull() ?: emptyList()
-            val currentFolderPlaylistNames = mutableSetOf<String>()
 
             scanResult.folderMap.forEach { (folderName, folderTracks) ->
                 if (folderTracks.isNotEmpty()) {
                     val playlistName = "📁 $folderName"
-                    currentFolderPlaylistNames.add(playlistName.lowercase())
 
                     val existingPlaylist = existingPlaylists.find {
                         it.name.equals(playlistName, ignoreCase = true) || it.name.equals(folderName, ignoreCase = true)
@@ -77,19 +72,18 @@ class MusicRepository(
                         existingPlaylist.id
                     }
 
-                    // Reset and refresh playlist tracks to prevent overlap across re-scans
                     playlistDao.clearTracksForPlaylist(playlistId)
-                    folderTracks.forEachIndexed { index, track ->
-                        val dbTrack = trackDao.getTrackByPath(track.audioPath)
-                        if (dbTrack != null) {
-                            playlistDao.addTrackToPlaylist(
-                                PlaylistTrackCrossRef(
-                                    playlistId = playlistId,
-                                    trackId = dbTrack.id,
-                                    orderPosition = index
-                                )
+                    val crossRefs = folderTracks.mapIndexedNotNull { index, track ->
+                        pathToIdMap[track.audioPath]?.let { trackId ->
+                            PlaylistTrackCrossRef(
+                                playlistId = playlistId,
+                                trackId = trackId,
+                                orderPosition = index
                             )
                         }
+                    }
+                    if (crossRefs.isNotEmpty()) {
+                        playlistDao.addTracksToPlaylist(crossRefs)
                     }
                 }
             }

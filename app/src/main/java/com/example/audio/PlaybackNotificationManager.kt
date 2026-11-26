@@ -23,10 +23,20 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Log
+import android.util.LruCache
 import android.util.Size
 import com.example.MainActivity
 import com.example.R
 import com.example.data.model.Track
+import com.example.data.network.OnlineArtworkCache
+import com.example.data.network.isOnlineStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 class PlaybackNotificationManager(private val context: Context) {
 
@@ -50,24 +60,112 @@ class PlaybackNotificationManager(private val context: Context) {
         const val ACTION_CUSTOM_BASS_BOOST = "com.example.harmanx.CUSTOM_BASS_BOOST"
     }
 
+    private val artworkScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val bitmapCache = LruCache<String, Bitmap>(24)
+    private val inFlightArtworkKeys = ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile
+    private var latestTrackPath: String? = null
+
+    @Volatile
+    private var latestIsPlaying: Boolean = false
+
+    @Volatile
+    private var latestPositionMs: Long = 0L
+
     init {
         createNotificationChannel()
         initMediaSession()
     }
 
-    private fun loadTrackThumbnail(track: Track): Bitmap {
-        // 1. Try embedded picture from MediaMetadataRetriever (works directly on audio file tags)
+    private fun getOrLoadCachedThumbnail(track: Track): Bitmap {
+        val key = track.audioPath
+        bitmapCache.get(key)?.let { return it }
+
+        // Always return immediately on caller thread; load real/remote artwork off the Main Thread
+        if (inFlightArtworkKeys.add(key)) {
+            artworkScope.launch {
+                try {
+                    val loaded = decodeTrackThumbnailOnIo(track)
+                    if (loaded != null) {
+                        bitmapCache.put(key, loaded)
+                        if (latestTrackPath == key) {
+                            publishNotificationAndSession(track, latestIsPlaying, latestPositionMs, loaded)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Async artwork load notice for ${track.title}: ${e.message}")
+                } finally {
+                    inFlightArtworkKeys.remove(key)
+                }
+            }
+        }
+        return generateGradientThumbnail(track)
+    }
+
+    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val height = options.outHeight
+        val width = options.outWidth
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize
+    }
+
+    private fun decodeSampledByteArray(bytes: ByteArray, reqSize: Int = 160): Bitmap? {
+        if (bytes.isEmpty()) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = calculateInSampleSize(bounds, reqSize, reqSize)
+            inPreferredConfig = Bitmap.Config.RGB_565
+        }
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOpts)
+    }
+
+    private fun decodeTrackThumbnailOnIo(track: Track): Bitmap? {
+        // 0. Online streams (iTunes / Live Radio): fetch cached cover image URL safely, never run MediaMetadataRetriever on HTTP
+        if (track.isOnlineStream) {
+            val remoteUrl = OnlineArtworkCache.get(track.audioPath)
+            if (!remoteUrl.isNullOrBlank()) {
+                try {
+                    val conn = (URL(remoteUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 4000
+                        readTimeout = 4000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", "HARMANX/Android")
+                    }
+                    try {
+                        if (conn.responseCode in 200..299) {
+                            val bytes = conn.inputStream.use { it.readBytes() }
+                            val bmp = decodeSampledByteArray(bytes, reqSize = 160)
+                            if (bmp != null) return bmp
+                        }
+                    } finally {
+                        conn.disconnect()
+                    }
+                } catch (_: Exception) {}
+            }
+            return null
+        }
+
+        // 1. Local files: Try embedded picture from MediaMetadataRetriever on IO thread
         try {
             val mmr = MediaMetadataRetriever()
             try {
                 if (track.audioPath.startsWith("content://")) {
                     mmr.setDataSource(context, Uri.parse(track.audioPath))
-                } else if (track.audioPath.isNotEmpty() && !track.audioPath.startsWith("synth_flac_")) {
+                } else if (track.audioPath.isNotEmpty() && !track.audioPath.startsWith("synth_")) {
                     mmr.setDataSource(track.audioPath)
                 }
                 val rawPicture = mmr.embeddedPicture
                 if (rawPicture != null && rawPicture.isNotEmpty()) {
-                    val bitmap = BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size)
+                    val bitmap = decodeSampledByteArray(rawPicture, reqSize = 192)
                     if (bitmap != null) {
                         return bitmap
                     }
@@ -85,7 +183,7 @@ class PlaybackNotificationManager(private val context: Context) {
                 val trackUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, track.id)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     try {
-                        val bitmap = context.contentResolver.loadThumbnail(trackUri, Size(512, 512), null)
+                        val bitmap = context.contentResolver.loadThumbnail(trackUri, Size(192, 192), null)
                         if (bitmap != null) return bitmap
                     } catch (_: Exception) {}
                 }
@@ -98,19 +196,18 @@ class PlaybackNotificationManager(private val context: Context) {
                 )
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     try {
-                        val bitmap = context.contentResolver.loadThumbnail(albumUri, Size(512, 512), null)
+                        val bitmap = context.contentResolver.loadThumbnail(albumUri, Size(192, 192), null)
                         if (bitmap != null) return bitmap
                     } catch (_: Exception) {}
                 }
                 context.contentResolver.openInputStream(albumUri)?.use { input ->
-                    val bitmap = BitmapFactory.decodeStream(input)
+                    val bitmap = decodeSampledByteArray(input.readBytes(), reqSize = 192)
                     if (bitmap != null) return bitmap
                 }
             }
         } catch (_: Exception) {}
 
-        // 3. Fallback: Generate high-resolution vibrant gradient album art
-        return generateGradientThumbnail(track)
+        return null
     }
 
     private fun generateGradientThumbnail(track: Track): Bitmap {
@@ -317,13 +414,26 @@ class PlaybackNotificationManager(private val context: Context) {
 
     fun updateNotification(track: Track?, isPlaying: Boolean, currentPositionMs: Long = 0L) {
         if (track == null) {
+            latestTrackPath = null
             cancelNotification()
             return
         }
 
-        // Extract real artwork bitmap if present
-        val albumBitmap = loadTrackThumbnail(track)
+        latestTrackPath = track.audioPath
+        latestIsPlaying = isPlaying
+        latestPositionMs = currentPositionMs
 
+        // Instant cached/gradient bitmap; async IO refresh happens automatically when real art is ready
+        val albumBitmap = getOrLoadCachedThumbnail(track)
+        publishNotificationAndSession(track, isPlaying, currentPositionMs, albumBitmap)
+    }
+
+    private fun publishNotificationAndSession(
+        track: Track,
+        isPlaying: Boolean,
+        currentPositionMs: Long,
+        albumBitmap: Bitmap
+    ) {
         // Update MediaSession Metadata and Playback State for system seekbar slider & Android Auto display
         try {
             val session = mediaSession
@@ -401,7 +511,7 @@ class PlaybackNotificationManager(private val context: Context) {
             Log.e(TAG, "Error updating MediaSession state", e)
         }
 
-        val notification = buildNotification(track, isPlaying, currentPositionMs)
+        val notification = buildNotification(track, isPlaying, currentPositionMs, albumBitmap)
         try {
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
@@ -409,9 +519,13 @@ class PlaybackNotificationManager(private val context: Context) {
         }
     }
 
-    fun buildNotification(track: Track, isPlaying: Boolean, currentPositionMs: Long = 0L): Notification {
-        // Extract real artwork bitmap if present
-        val albumBitmap = loadTrackThumbnail(track)
+    fun buildNotification(
+        track: Track,
+        isPlaying: Boolean,
+        currentPositionMs: Long = 0L,
+        preloadedBitmap: Bitmap? = null
+    ): Notification {
+        val albumBitmap = preloadedBitmap ?: getOrLoadCachedThumbnail(track)
 
         // Content Intent (Open App on tap)
         val openAppIntent = Intent(context, MainActivity::class.java).apply {

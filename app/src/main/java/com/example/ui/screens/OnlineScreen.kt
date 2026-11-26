@@ -100,9 +100,10 @@ fun OnlineScreen(
     activeQuery: String,
     selectedRadioCategory: RadioCategory,
     onInitialize: () -> Unit,
-    onSearchSongs: (String) -> Unit,
-    onSelectRadioCategory: (RadioCategory) -> Unit,
-    onSearchRadio: (String) -> Unit,
+    onInitializeRadio: () -> Unit = {},
+    onSearchSongs: (String, Boolean) -> Unit,
+    onSelectRadioCategory: (RadioCategory, Boolean) -> Unit,
+    onSearchRadio: (String, Boolean) -> Unit,
     onPlayTrackFromList: (List<Track>, Int) -> Unit,
     onPlayNext: (Track) -> Unit,
     onAddToQueue: (Track) -> Unit,
@@ -116,6 +117,12 @@ fun OnlineScreen(
 
     LaunchedEffect(Unit) {
         onInitialize()
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == OnlineModeTab.LIVE_RADIO) {
+            onInitializeRadio()
+        }
     }
 
     val quickSongChips = remember {
@@ -177,10 +184,10 @@ fun OnlineScreen(
             IconButton(
                 onClick = {
                     if (selectedTab == OnlineModeTab.ITUNES_SONGS) {
-                        onSearchSongs(searchInput.ifBlank { activeQuery })
+                        onSearchSongs(searchInput.ifBlank { activeQuery }, true)
                     } else {
-                        if (searchInput.isNotBlank()) onSearchRadio(searchInput)
-                        else onSelectRadioCategory(selectedRadioCategory)
+                        if (searchInput.isNotBlank()) onSearchRadio(searchInput, true)
+                        else onSelectRadioCategory(selectedRadioCategory, true)
                     }
                 },
                 modifier = Modifier
@@ -279,7 +286,7 @@ fun OnlineScreen(
                             onClick = {
                                 searchInput = ""
                                 if (selectedTab == OnlineModeTab.LIVE_RADIO) {
-                                    onSelectRadioCategory(selectedRadioCategory)
+                                    onSelectRadioCategory(selectedRadioCategory, false)
                                 }
                             }
                         ) {
@@ -290,9 +297,9 @@ fun OnlineScreen(
                         onClick = {
                             keyboardController?.hide()
                             if (selectedTab == OnlineModeTab.ITUNES_SONGS) {
-                                onSearchSongs(searchInput)
+                                onSearchSongs(searchInput, false)
                             } else {
-                                onSearchRadio(searchInput)
+                                onSearchRadio(searchInput, false)
                             }
                         },
                         modifier = Modifier.testTag("online_search_button")
@@ -307,9 +314,9 @@ fun OnlineScreen(
                 onSearch = {
                     keyboardController?.hide()
                     if (selectedTab == OnlineModeTab.ITUNES_SONGS) {
-                        onSearchSongs(searchInput)
+                        onSearchSongs(searchInput, false)
                     } else {
-                        onSearchRadio(searchInput)
+                        onSearchRadio(searchInput, false)
                     }
                 }
             ),
@@ -341,7 +348,7 @@ fun OnlineScreen(
                         selected = selected,
                         onClick = {
                             searchInput = chip
-                            onSearchSongs(chip)
+                            onSearchSongs(chip, false)
                         },
                         label = {
                             Text(
@@ -371,7 +378,7 @@ fun OnlineScreen(
                         selected = selected,
                         onClick = {
                             searchInput = ""
-                            onSelectRadioCategory(cat)
+                            onSelectRadioCategory(cat, false)
                         },
                         label = {
                             Text(
@@ -480,9 +487,9 @@ fun OnlineScreen(
                         Button(
                             onClick = {
                                 if (selectedTab == OnlineModeTab.ITUNES_SONGS) {
-                                    onSearchSongs(searchInput.ifBlank { activeQuery })
+                                    onSearchSongs(searchInput.ifBlank { activeQuery }, true)
                                 } else {
-                                    onSelectRadioCategory(selectedRadioCategory)
+                                    onSelectRadioCategory(selectedRadioCategory, true)
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = CyberNeonCyan),

@@ -180,12 +180,12 @@ fun AuraMusicApp(
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val isBuffering by viewModel.isBuffering.collectAsStateWithLifecycle()
     val playbackError by viewModel.playbackError.collectAsStateWithLifecycle()
-    val currentPositionMs by viewModel.currentPositionMs.collectAsStateWithLifecycle()
-    val durationMs by viewModel.durationMs.collectAsStateWithLifecycle()
     val isShuffle by viewModel.isShuffle.collectAsStateWithLifecycle()
     val repeatMode by viewModel.repeatMode.collectAsStateWithLifecycle()
     val isGaplessEnabled by viewModel.isGaplessEnabled.collectAsStateWithLifecycle()
     val crossfadeDurationSec by viewModel.crossfadeDurationSec.collectAsStateWithLifecycle()
+    val sleepTimerRemainingSec by viewModel.sleepTimerRemainingSec.collectAsStateWithLifecycle()
+    val cacheSizeBytes by viewModel.cacheSizeBytes.collectAsStateWithLifecycle()
 
     val isExternalAudioConnected by viewModel.isExternalAudioConnected.collectAsStateWithLifecycle()
     val isAuxSimulated by viewModel.isAuxSimulated.collectAsStateWithLifecycle()
@@ -252,8 +252,8 @@ fun AuraMusicApp(
                         currentTrack = currentTrack,
                         isPlaying = isPlaying,
                         isBuffering = isBuffering,
-                        currentPositionMs = currentPositionMs,
-                        durationMs = durationMs,
+                        currentPositionMsFlow = viewModel.currentPositionMs,
+                        durationMsFlow = viewModel.durationMs,
                         onPlayPauseClick = { viewModel.togglePlayPause() },
                         onNextClick = { viewModel.playNext() },
                         onPreviousClick = { viewModel.playPrevious() },
@@ -343,6 +343,7 @@ fun AuraMusicApp(
                         onClick = {
                             selectedTab = NavTab.SETTINGS
                             isFullPlayerVisible = false
+                            viewModel.refreshCacheSize()
                         },
                         icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                         label = { Text("Settings", fontSize = 10.sp, maxLines = 1, fontWeight = FontWeight.Bold) },
@@ -416,9 +417,10 @@ fun AuraMusicApp(
                     activeQuery = onlineSearchQuery,
                     selectedRadioCategory = selectedRadioCategory,
                     onInitialize = { viewModel.ensureOnlineInitialized() },
-                    onSearchSongs = { query -> viewModel.searchOnlineSongs(query) },
-                    onSelectRadioCategory = { cat -> viewModel.selectRadioCategory(cat) },
-                    onSearchRadio = { query -> viewModel.searchOnlineRadio(query) },
+                    onInitializeRadio = { viewModel.ensureRadioInitialized() },
+                    onSearchSongs = { query, force -> viewModel.searchOnlineSongs(query, forceRefresh = force) },
+                    onSelectRadioCategory = { cat, force -> viewModel.selectRadioCategory(cat, forceRefresh = force) },
+                    onSearchRadio = { query, force -> viewModel.searchOnlineRadio(query, forceRefresh = force) },
                     onPlayTrackFromList = { list, idx -> viewModel.playTrackList(list, idx) },
                     onPlayNext = { track ->
                         viewModel.addToPlayNext(track)
@@ -485,6 +487,13 @@ fun AuraMusicApp(
                     crossfadeDurationSec = crossfadeDurationSec,
                     onToggleGapless = { viewModel.toggleGaplessMode() },
                     onCrossfadeDurationChange = { viewModel.setCrossfadeDuration(it) },
+                    sleepTimerRemainingSec = sleepTimerRemainingSec,
+                    onSetSleepTimer = { viewModel.setSleepTimer(it) },
+                    cacheSizeBytes = cacheSizeBytes,
+                    onClearCache = {
+                        viewModel.clearAppCaches()
+                        Toast.makeText(context, "Preload & artwork cache cleared", Toast.LENGTH_SHORT).show()
+                    },
                     onScanStorageClick = { viewModel.scanDeviceAudioFiles() },
                     isAuxSimulated = isAuxSimulated,
                     isExternalAudioConnected = isExternalAudioConnected,
@@ -498,8 +507,8 @@ fun AuraMusicApp(
                 currentTrack = currentTrack,
                 isPlaying = isPlaying,
                 isBuffering = isBuffering,
-                currentPositionMs = currentPositionMs,
-                durationMs = durationMs,
+                currentPositionMsFlow = viewModel.currentPositionMs,
+                durationMsFlow = viewModel.durationMs,
                 isShuffle = isShuffle,
                 repeatMode = repeatMode,
                 isGaplessEnabled = isGaplessEnabled,
