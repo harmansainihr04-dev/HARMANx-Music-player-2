@@ -56,7 +56,6 @@ import com.example.ui.theme.CyberTextSecondary
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Headphones
 import com.example.ui.theme.EqNeonGreen
-import com.example.ui.theme.EqNeonGreenAccent
 import com.example.ui.theme.FlacBadgeGreen
 
 @Composable
@@ -97,60 +96,64 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Gapless Playback Card
+        // Gapless Playback & Crossfade Card (Apple Music Style)
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp)),
             colors = CardDefaults.cardColors(containerColor = CyberSurfaceDark)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(16.dp)
             ) {
                 Row(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.GraphicEq,
-                        contentDescription = null,
-                        tint = CyberElectricPurple,
-                        modifier = Modifier.size(28.dp)
-                    )
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Text(
-                            text = "Gapless Playback",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = CyberTextPrimary
-                            )
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = CyberElectricPurple,
+                            modifier = Modifier.size(28.dp)
                         )
-                        Text(
-                            text = "Eliminates inter-track silence gaps during playback transitions",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = CyberTextSecondary,
-                                fontSize = 12.sp
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column {
+                            Text(
+                                text = "Gapless Playback",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyberTextPrimary
+                                )
                             )
-                        )
+                            Text(
+                                text = "Smooth crossfade & zero-gap track transitions",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = CyberTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
                     }
-                }
 
-                Switch(
-                    checked = isGaplessEnabled,
-                    onCheckedChange = { onToggleGapless() },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = CyberElectricPurple,
-                        checkedTrackColor = CyberSurfaceVariant
-                    ),
-                    modifier = Modifier.testTag("gapless_setting_switch")
-                )
+                    Switch(
+                        checked = isGaplessEnabled,
+                        onCheckedChange = { onToggleGapless() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = CyberElectricPurple,
+                            checkedTrackColor = CyberSurfaceVariant
+                        ),
+                        modifier = Modifier.testTag("gapless_setting_switch")
+                    )
+                }
             }
         }
 

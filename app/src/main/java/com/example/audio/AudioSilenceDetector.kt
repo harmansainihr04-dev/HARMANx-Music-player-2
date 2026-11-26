@@ -23,7 +23,7 @@ import kotlin.math.abs
 object AudioSilenceDetector {
 
     private const val TAG = "AudioSilenceDetector"
-    private const val AMPLITUDE_THRESHOLD = 500 // ~ -38 dB: above microphone room noise, active voice/sound
+    private const val AMPLITUDE_THRESHOLD = 35 // ~ -59 dB: only pure digital dead-air silence, preserves musical fadeouts
     private const val TIMEOUT_US = 5000L
 
     data class TrimBounds(
@@ -46,8 +46,7 @@ object AudioSilenceDetector {
 
         // For synthetic tracks (FLAC demo tone generator)
         if (!audioPath.startsWith("content://") && !audioPath.startsWith("file://") && !audioPath.startsWith("android.resource://")) {
-            val outro = (durationMs - 2000L).coerceAtLeast(1000L)
-            val bounds = TrimBounds(introStartMs = 0L, outroEndMs = outro)
+            val bounds = TrimBounds(introStartMs = 0L, outroEndMs = durationMs)
             cache[audioPath] = bounds
             return@withContext bounds
         }
@@ -77,7 +76,7 @@ object AudioSilenceDetector {
 
             if (audioTrackIndex == -1 || format == null) {
                 extractor.release()
-                val fallback = TrimBounds(0L, (durationMs - 1500L).coerceAtLeast(1000L))
+                val fallback = TrimBounds(0L, durationMs)
                 cache[audioPath] = fallback
                 return@withContext fallback
             }
@@ -109,7 +108,7 @@ object AudioSilenceDetector {
             finalBounds
         } catch (e: Exception) {
             Log.d(TAG, "Silence detection fallback for $audioPath: ${e.message}")
-            val fallback = TrimBounds(0L, (durationMs - 1500L).coerceAtLeast(1000L))
+            val fallback = TrimBounds(0L, durationMs)
             cache[audioPath] = fallback
             fallback
         }
@@ -222,9 +221,9 @@ object AudioSilenceDetector {
             }
         }
 
-        // Add 250ms decay tail so last note isn't unnaturally chopped mid-vowel
+        // Add 250ms decay tail and only trim when genuine digital dead air > 800ms exists
         val outroCutPoint = (lastAudibleTimeMs + 250L).coerceAtMost(durationMs)
-        return if (outroCutPoint < durationMs - 400L) outroCutPoint else durationMs
+        return if (outroCutPoint < durationMs - 800L) outroCutPoint else durationMs
     }
 
     private fun containsAudioSignal(buffer: ByteBuffer, offset: Int, size: Int): Boolean {
